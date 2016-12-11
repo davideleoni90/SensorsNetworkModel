@@ -798,7 +798,7 @@ void send_beacon(){
          * estimator for this service
          */
 
-        send_routing_packet(self,BROADCAST_ADDRESS,&routing_packet);
+        send_routing_packet(BROADCAST_ADDRESS,&routing_packet);
 }
 
 /*

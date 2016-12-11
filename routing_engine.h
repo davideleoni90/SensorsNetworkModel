@@ -28,3 +28,4 @@ void neighbor_evicted(unsigned int address);
 bool get_etx(unsigned short* etx);
 node get_parent();
 void update_route();
+void receive_beacon(ctp_routing_frame* routing_frame, unsigned int from);

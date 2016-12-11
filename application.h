@@ -11,8 +11,7 @@
 
 enum{
         SEND_BEACON=1,
-        SEND_DATA_PACKET=2
-
+        SEND_DATA_PACKET=2,
 };
 
 /*

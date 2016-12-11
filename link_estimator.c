@@ -9,6 +9,9 @@
  * the number of beacons actually received. The outgoing quality is calculated as the ratio between the number the
  * number of data packets sent to the neighbor and the number of acks received from him.
  *
+ * All the above information are stored in the LINK ESTIMATOR TABLE (or NEIGHBOR TABLE), with one entry for each of the
+ * neighbors of the node
+ *
  * The ROUTING ENGINE relies on the layer provided by the LINK ESTIMATOR in order to send routing beacons. On the other
  * side, when a node receives a beacon, the information contained are used to update the link estimator table: this
  * table contains a list of the neighbors of a node along with information like the 1-hop ETX. This table is created
@@ -24,8 +27,8 @@ extern node me;
 /*
  * LINK ESTIMATOR TABLE
  *
- * An array of link_estimator_table_entry with a number of NEIGHBOR_TABLE_SIZE
- * elements
+ * An array of link_estimator_table_entry with a number of NEIGHBOR_TABLE_SIZE elements: each entry corresponds to a
+ * neighbor node
  */
 
 link_estimator_table_entry link_estimator_table[NEIGHBOR_TABLE_SIZE];
@@ -46,7 +49,7 @@ unsigned char beacon_sequence=0;
  */
 
 /*
- * SET TABLE ENTRY
+ * INIT TABLE ENTRY
  *
  * Initialize the entry in the estimator table for the neighbor with the given ID at the given position
  *
@@ -149,7 +152,10 @@ unsigned char find_estimator_entry(unsigned int neighbor){
 /*
  * FIND WORST ENTRY
  *
- * Returns the index of the entry in the table with the highest ETX which is higher than or equal to the given threshold
+ * Returns the index of the entry in the table with the highest ETX which is greater than or equal to the given threshold
+ * This routine gets called when a new entry has to be initialized in the neighbor table and there are no free entries
+ * left => it helps deciding whether the new entry has to replace an existing one and, in this case, which of the existing
+ * entries has to be evicted
  *
  * @etx_threshold: threshold for the value of ETX
  *
@@ -254,7 +260,9 @@ unsigned char find_estimator_worst_entry(unsigned char etx_threshold){
  * FIND RANDOM ENTRY
  *
  * Returns the index of a random entry that is VALID and NOT PINNED; if such an entry can't be found, INVALID_ENTRY is
- * returned
+ * returned.
+ * This routine gets called when it is necessary to evict an entry of the neighbor table and known of the existing entries
+ * is really worse than the other ones => choose randomly
  */
 
 unsigned char find_random_entry(){
@@ -275,7 +283,7 @@ unsigned char find_random_entry(){
          * Number of entries that can be selected, i.e. VALID AND NOT PINNED NOR MATURE
          */
 
-        unsigned char candidates;
+        unsigned char candidates=0;
 
         /*
          * Scan the estimator table to count the number of candidates
@@ -318,7 +326,7 @@ unsigned char find_random_entry(){
 
         /*
          * At least one entry is eligible => get the value of counter, which is used to randomly select an entry: it
-         * is the result of modulo divion of a random value by the number of candidates
+         * is the result of modulo division of a random value by the number of candidates
          */
 
         counter= ((unsigned char)Random()) % candidates;
@@ -361,10 +369,138 @@ unsigned char find_random_entry(){
 }
 
 /*
+ * FIND FREE ENTRY
+ *
+ * Returns the index of the free first entry in the estimator table, if one exists, INVALID_ENTRY otherwise
+ */
+
+unsigned char find_estimator_free_entry(){
+
+        /*
+         * Return value: index of the entry
+         */
+
+        unsigned char index;
+
+        /*
+         * Look for all the entries of the neighbor table and stop when one is not valid
+         */
+
+        for(index=0;index<NEIGHBOR_TABLE_SIZE;index++){
+
+                /*
+                 * Skip valid entries
+                 */
+
+                if(link_estimator_table[index].flags & VALID_ENTRY){
+
+                }
+
+                        /*
+                         * If an entry is not marked as VALID, it can be re-used
+                         */
+
+                else{
+                        return index;
+                }
+        }
+
+        /*
+         * We get here if none of the entries in the table is free -> return INVALID_ENTRY
+         */
+
+        return INVALID_ENTRY;
+}
+
+/*
+ * LINK ESTIMATOR TABLE OPERATIONS - end
+ */
+
+/*
  * API FUNCTIONS - start
  *
- * Functions exposed by the link estimator, available to the Routing and Forwarding Engine
+ * Functions exposed by the link estimator, available to the Routing and Forwarding Engines
  */
+
+/*
+ * INSERT NEIGHBOR
+ *
+ * Function called by the ROUTING ENGINE when a beacon from the root of the collection tree is received: by calling this
+ * function, the ROUTING ENGINE wants to be sure that an entry in the neighbor table exists for the root, since it has
+ * to selected as parent.
+ *
+ * The function checks whether the entry exists and, if not, tries to create one
+ *
+ * @neighbor: ID and coordinates of the neighbor the entry has to be created for
+ */
+
+void insert_neighbor(node neighbor){
+
+        /*
+         * Index of the entry in the estimator table that matches the addres (if any)
+         */
+
+        unsigned char index;
+
+        /*
+         * Search the estimator table for an entry with the given address
+         */
+
+        index=find_estimator_entry(neighbor.ID);
+
+        /*
+         * Check result of the query: if no entry matches the given ID, a new entry has to be created for it
+         */
+
+        if(index==INVALID_ENTRY){
+
+                /*
+                 * No entry matches the given ID => check whether there's a free entry in the table
+                 */
+
+                index=find_estimator_free_entry();
+
+                /*
+                 * Check if there's a free entry
+                 */
+
+                if(index!=INVALID_ENTRY){
+
+                        /*
+                         * There's at least one free entry in the table => initialize it to the identity of the given
+                         * neighbor
+                         */
+
+                        init_estimator_entry(neighbor,index);
+                }
+                else{
+
+                        /*
+                         * There's no free space left in the neighbor table => a node to be evicted has to be found
+                         * => look for the one with 1-hop ETX greater than EVICT_BEST_ETX_THRESHOLD
+                         */
+
+                        index=find_estimator_worst_entry(EVICT_BEST_ETX_THRESHOLD);
+
+                        /*
+                         * Check if a victim node has been found
+                         *
+                         * NOTE: At this point we are almost sure that a victim has been found, because the threshold
+                         * is ver tight
+                         */
+
+                        if(index!=INVALID_ENTRY){
+
+                                /*
+                                 * A victim node has been found => replace it
+                                 */
+
+                                init_estimator_entry(neighbor,index);
+
+                        }
+                }
+        }
+}
 
 /*
  * GET 1-HOP ETX
@@ -382,7 +518,7 @@ unsigned char find_random_entry(){
 unsigned short get_one_hop_etx(unsigned int address){
 
         /*
-         * Index of the entry in the estimator table that matches the entry (if any)
+         * Index of the entry in the estimator table that matches the address (if any)
          */
 
         unsigned char index;
@@ -472,7 +608,8 @@ node_coordinates get_parent_coordinates(unsigned int parent){
 /*
  * UNPIN NEIGHBOR
  *
- * Clear the PINNED flag of the entry in the estimator table corresponding to the given ID
+ * Clear the PINNED flag of the entry in the estimator table corresponding to the given ID.
+ * This has to be done when the route of the node changes and a another neighbor is chosen as the new node
  *
  * @address: the ID of the node whose entry has to be unpinned
  *
@@ -523,7 +660,8 @@ bool unpin_neighbor(unsigned int address){
 /*
  * PIN NEIGHBOR
  *
- * Set the PINNED flag of the entry in the estimator table corresponding to the given ID
+ * Set the PINNED flag of the entry in the estimator table corresponding to the given ID.
+ * The pinned entry is the one corresponding to the parent node
  *
  * @address: the ID of the node whose entry has to be unpinned
  *
@@ -632,25 +770,24 @@ bool clear_data_link_quality(unsigned int address){
 /*
  * SEND ROUTING PACKET
  *
- * The function invoked by the ROUTING ENGINE when a beacon has to be broadcasted to all the nodes in the tree.
- * Set the fields of the link estimator frame and combine this with the given routing frame => the resulting packet is
+ * The function invoked by the ROUTING ENGINE when a beacon has to be broadcasted to all the neighbor nodes
+ * Set the fields of the link estimator frame and combine this with the given routing frame => the resulting beacon is
  * sent to the other nodes by scheduling a new simulator event.
  *
- * @src: ID of the current node, that sends the beacon
  * @dst: th ID of the recipient node or BROADCAST_ADDRESS in case of broadcast messages
  * @routing_frame: pointer to the routing frame, initialized by the routing engine, of the routing packet to send
  */
 
-void send_routing_packet(unsigned int src,unsigned int dst,ctp_routing_packet* beacon){
+void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon){
 
         /*
-         * Pointer to the physical and data link frame of the beacon being sent
+         * Pointer to the physical and data link frame of the beacon that is being sent
          */
 
         physical_datalink_overhead* phy_mac_overhead;
 
         /*
-         * Pointer to the link estimator frame of the beacon being sent
+         * Pointer to the link estimator frame of the beacon that is being sent
          */
 
         ctp_link_estimator_frame* link_estimator_frame;
@@ -674,7 +811,7 @@ void send_routing_packet(unsigned int src,unsigned int dst,ctp_routing_packet* b
         if(index==INVALID_ENTRY)
 
                 /*
-                 * No entry in the neoghbor table matches the recipient => no beacon can be sent to him
+                 * No entry in the neighbor table matches the recipient => no beacon can be sent to him
                  */
 
                 return;
@@ -714,7 +851,7 @@ void send_routing_packet(unsigned int src,unsigned int dst,ctp_routing_packet* b
 
         /*
          * At this point the beacon is well formed, so it's time to send it to the specified destination => schedule a
-         * new event
+         * new brodcast event
          */
 
         broadcast_event(&beacon,BEACON_PACKET);
@@ -725,65 +862,17 @@ void send_routing_packet(unsigned int src,unsigned int dst,ctp_routing_packet* b
  */
 
 /*
- * FIND FREE ENTRY
+ * COMPUTE 1-HOP ETX OF A NEIGHBOR
  *
- * Returns the index of the free first entry in the estimator table, if one exists, INVALID_ENTRY otherwise
- */
-
-unsigned char find_estimator_free_entry(){
-
-        /*
-         * Return value: index of the entry
-         */
-
-        unsigned char index;
-
-        /*
-         * Look for all the entries of the neighbor table and stop when one is not valid
-         */
-
-        for(index=0;index<NEIGHBOR_TABLE_SIZE;index++){
-
-                /*
-                 * Skip valid entries
-                 */
-
-                if(link_estimator_table[index].flags & VALID_ENTRY){
-
-                }
-
-                        /*
-                         * If an entry is not marked as VALID, it can be re-used
-                         */
-
-                else{
-                        return index;
-                }
-        }
-
-        /*
-         * We get here if none of the entries in the table is free -> return INVALID_ENTRY
-         */
-
-        return INVALID_ENTRY;
-}
-
-/*
- * LINK ESTIMATOR TABLE OPERATIONS - end
- */
-
-/*
- * COMPUTE ETX OF A NEIGHBOR
+ * This function is used to compute the value of 1-hop ETX of the link to neighbor WHEN THE INGOING LINK QUALITY HAS
+ * TO BE RECOMPUTED (after BLQ_PKT_WINDOW beacons from the neighbr itself have been received).
+ * In particular, this function returns ten times the value of the actual 1-hop ETX value.
+ * This is needed because the function "updateETX" works on values scaled by 10, in order to avoid float variables and
+ * still not losing too much precision due to integer division.
  *
- * This function is used to compute the value of ETX to be stored in the corresponding field of an entry of the
- * estimator table, in case the ETX the ingoing quality of a link gets updated.
- * In particular, this function returns ten times the value of the actual ETX value.
- * This is needed because the function "updateETX" works on values scaled by 10, in order to avoid float variables yet
- * not losing too much precision due to integer division.
+ * @new_quality: new estimation of the ingoing link quality, multiplied by 250
  *
- * @new_quality: new estimation of the ingoing link quality
- *
- * Returns the value of ETX of a neighbor, multiplied by 10
+ * Returns the 1-hop ETX of a neighbor, multiplied by 10
  */
 
 unsigned short compute_ETX(unsigned char new_quality){
@@ -810,7 +899,7 @@ unsigned short compute_ETX(unsigned char new_quality){
                 if(etx>250){
 
                         /*
-                         * The computed quality (scaled by 250) is less than 0,04, namely
+                         * The computed quality (recall that it was given scaled by 250) is less than 0,04, namely
                          *
                          * beacons_received/total_beacons<0,04
                          *
@@ -832,14 +921,14 @@ unsigned short compute_ETX(unsigned char new_quality){
 }
 
 /*
- * UPDATE ETX OF A NEIGHBOR
+ * UPDATE 1-hop ETX OF A NEIGHBOR
  *
  * When a new estimation of the outgoing quality (sending data packets) or the ingoing quality (sending beacons)
- * is performed, the ETX is recomputed.
+ * is performed, the 1-hop ETX is recomputed.
  * IMPORTANT NOTE: both the ingoing and outgoing quality parameters are scaled by 10 in order not too lose too much
- * precision when due to integer divisions, so the final value computed for ETX has to be "rescaled" dividing by 10
+ * precision due to integer divisions, so the final value computed for 1-hop ETX has to be "rescaled" dividing by 10
  *
- * @table_entry: pointer to the entry in the table corresponding to the ETX to be updated
+ * @table_entry: pointer to the entry in the table corresponding to the 1-hop ETX to be updated
  * @new_quality: new estimation of the link quality
  */
 
@@ -856,7 +945,7 @@ void update_ETX(link_estimator_table_entry* entry,unsigned short new_quality){
  * deliver => since the counters of sent packets and acknowledged packets are set to 0 after DLQ_PKT_WINDOW packets have
  * been sent, the value for outgoing link quality in case no ack is received can be at most DLQ_PKT_WINDOW
  *
- * @table_entry: pointer to the entry in the table corresponding to the ETX to be updated
+ * @table_entry: pointer to the entry in the table corresponding to the 1-hop ETX to be updated
  */
 
 void update_outgoing_quality(link_estimator_table_entry* entry){
@@ -876,7 +965,7 @@ void update_outgoing_quality(link_estimator_table_entry* entry){
         if(!entry->data_acknowledged){
                 new_outgoing_quality=entry->data_sent*10;
         }
-
+        else{
                 /*
                  * Otherwise, set the new value for the quality to the ratio of the packets sent over the number of
                  * packets acknowledged.
@@ -884,7 +973,6 @@ void update_outgoing_quality(link_estimator_table_entry* entry){
                  * precision due to truncation by the integer division, the numerator is scaled by 10
                  */
 
-        else{
                 new_outgoing_quality=(10*entry->data_sent)/entry->data_acknowledged;
 
                 /*
@@ -896,26 +984,18 @@ void update_outgoing_quality(link_estimator_table_entry* entry){
         }
 
         /*
-         * Recompute the ETX of the link to the neighbor
+         * Recompute the 1-hop ETX of the link to the neighbor
          */
 
         update_ETX(entry,new_outgoing_quality);
 }
 
 /*
- * A beacon may not include all the entries of the estimator table => we keep track to the index of the index of the
- * last entry transmitted through the beacon, so it's possible to send all the entries soon or later, applying a round
- * robin algorithm
- */
-
-//unsigned char last_index=0;
-
-/*
  * UPDATE INGOING LINK QUALITY
  *
- * After BLQ_PKT_WINDOW beacons have been received from a neighbor, the value for the ingoing quality of the
- * corresponding link is updated.
- * Its value is equal to the number of beacons received from a neighbor over the number of beacons broadcasted by it.
+ * After BLQ_PKT_WINDOW beacons have been received from a neighbor, the value for the ingoing quality of the corresponding
+ * link is updated.
+ * It is equal to the number of beacons received from a neighbor over the number of beacons broadcasted by it.
  * Before being used to compute the 1-hop ETX, the value for ingoing quality is passed through ax exponential smoothing
  * filter: this filter averages the new value of ingoing quality and those computed in the past, but weighting the
  * latter according to an exponentially decaying function.
@@ -1006,7 +1086,7 @@ void update_ingoing_quality(unsigned int neighbor){
                                         entry->ingoing_quality=new_ingoing_quality;
 
                                         /*
-                                         * Compute the first value for ETX of the neighbor
+                                         * Compute the first value for 1-hop ETX of the neighbor
                                          */
 
                                         entry->one_hop_etx=compute_ETX(new_ingoing_quality);
@@ -1020,7 +1100,7 @@ void update_ingoing_quality(unsigned int neighbor){
 
                                 /*
                                  * When we get here, we can be sure that the entry of the neighbor has some values
-                                 * for ingoing quality and ETX.
+                                 * for ingoing quality and 1-hop ETX.
                                  * First compute the new value for ingoing quality
                                  */
 
@@ -1041,7 +1121,7 @@ void update_ingoing_quality(unsigned int neighbor){
                                 entry->beacons_missed=0;
 
                                 /*
-                                 * Update the value of ETX for this entry with the new value for ingoing quality
+                                 * Update the value of 1-hop ETX for this entry with the new value for ingoing quality
                                  */
 
                                 update_ETX(entry,entry->ingoing_quality);
@@ -1244,7 +1324,7 @@ void process_received_beacon(physical_frame* physical_link_frame,ctp_link_estima
                                  * forward data to the root of the collection tree => find such an entry
                                  */
 
-                                index=find_estimator_worst_entry(EVICT_ETX_THRESHOLD);
+                                index=find_estimator_worst_entry(EVICT_WORST_ETX_THRESHOLD);
 
                                 /*
                                  * Check whether an entry to be evicted has been found
@@ -1273,8 +1353,8 @@ void process_received_beacon(physical_frame* physical_link_frame,ctp_link_estima
                                          * ask whether the channel to the sender has a high quality: if so the beacon
                                          * would be further processed, otherwise it would be dropped.
                                          *
-                                         * This model ignores the PHYSICAL LAYER, so the white bit is not considered and
-                                         * a beacon is further processed.
+                                         * This model ignores the white bit is not considered and a beacon is further
+                                         * processed.
                                          *
                                          * In particular, the link estimator asks the ROUTING LAYER whether the sender
                                          * of the beacon should be inserted in the estimator table or not: if so, a
@@ -1342,16 +1422,17 @@ void receive_routing_packet(void* message){
 }
 
 /*
- * ACKNOWLEDGMENT NOT RECEIVED
+ * CHECK IF ACKNOWLEDGMENT RECEIVED
  *
- * Function called by the FORWARDING ENGINE to signal that the intended recipient of a data packet sent did not send the
- * corresponding acknowledgment => as a consequence, the outgoing link quality between the current node and the recipient
- * has to be re-computed.
+ * Function called by the FORWARDING ENGINE to signal that the intended recipient of a data packet sent or did not send
+ * the corresponding acknowledgment => as a consequence, the outgoing link quality between the current node and the
+ * recipient has to be re-computed.
  *
  * @recipient: ID of the intended recipient
+ * @ack_received: boolean variable indicating whether the ack has been received or not
  */
 
-void ack_not_received(unsigned int recipient){
+void check_if_ack_received(unsigned int recipient,bool ack_received){
 
         /*
          * Pointer to the entry of the table corresponding to the given recipient
@@ -1378,7 +1459,7 @@ void ack_not_received(unsigned int recipient){
         if(index!=INVALID_ENTRY){
 
                 /*
-                 * There's an entry mathing the given ID => get it
+                 * There's an entry matching the given ID => get it
                  */
 
                 entry=&link_estimator_table[index];
@@ -1388,6 +1469,13 @@ void ack_not_received(unsigned int recipient){
                  */
 
                 entry->data_sent++;
+
+                /*
+                 * If the ack has been received, increase by one the counter of acknowledged packets
+                 */
+
+                if(ack_received)
+                        entry->data_acknowledged++;
 
                 /*
                  * Check whether the number of data packets sent to the neighbor has reached the bound that triggers an

@@ -13,7 +13,18 @@ enum{
          * to added and the table itself is full
          */
 
-        EVICT_ETX_THRESHOLD=65,
+        EVICT_WORST_ETX_THRESHOLD=65,
+
+        /*
+         * If a node has an 1-hop ETX below this threshold, it is evicted from the estimator table if a new entry has
+         * to added and the table itself is full AND A FREE PLACE FOR THE ROOT NODE HAS TO BE FOUND
+         *
+         * Since the root is the most important, it's crucial to create an entry for it when a beacon by it is received
+         * => if the table is full, another node has to be replaced => with such a tighter threshold, which corresponds
+         * to one hop (recall that ETX is about ten times the number of hops), we are likely to find a victim node
+         */
+
+        EVICT_BEST_ETX_THRESHOLD=10,
 
         /*
          * If the number of beacons lost from a neighbor is bigger than this value, the entry for the neighbor is
@@ -31,7 +42,7 @@ enum{
         ALPHA=9, // The link estimation is exponentially decayed with this parameter ALPHA
         DLQ_PKT_WINDOW=5, // Number of packets to send before updating the outgoing quality of the link to a neighbor
         BLQ_PKT_WINDOW=3, // Number of beacons to receive before updating the ingoing quality of the link to a neighbor
-        INVALID_ENTRY=0xff // Index returned when the entry corresponding to a neighbor is not found
+        INVALID_ENTRY=0xff // Value returned when the entry corresponding to a neighbor is not found
 
 };
 
@@ -116,9 +127,9 @@ unsigned short get_one_hop_etx(unsigned int address);
 bool unpin_neighbor(unsigned int address);
 bool pin_neighbor(unsigned int address);
 bool clear_data_link_quality(unsigned int address);
-void send_routing_packet(unsigned int src,unsigned int dst,ctp_routing_packet* beacon);
+void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon);
 void receive_routing_packet(void* message);
 bool pin_neighbor(unsigned int address);
-void insert_neighbor(unsigned int address);
+void insert_neighbor(node neighbor);
 node_coordinates get_parent_coordinates(unsigned int parent);
-void ack_received(unsigned int recipient,bool received)
+void check_if_ack_received(unsigned int recipient,bool ack_received);
