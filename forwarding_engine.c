@@ -605,7 +605,7 @@ bool forward_data_packet() {
          * this is how the link estimator evaluates the link quality to the recipient
          */
 
-        self_wait_event(DATA_PACKET_ACK_OFFSET,&parent,DATA_PACKET_ACK_INTERVAL);
+        wait_time(DATA_PACKET_ACK_OFFSET,&parent,DATA_PACKET_ACK_INTERVAL);
 }
 
 /*
@@ -868,7 +868,7 @@ void receive_ack(bool is_packet_acknowledged){
                  * from the last data packet sent
                  */
 
-                ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,false);
+                check_if_ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,false);
 
                 /*
                  * Since the outgoing link quality between the current node and the recipient has possibly changed, it
@@ -891,7 +891,7 @@ void receive_ack(bool is_packet_acknowledged){
                          * attempt
                          */
 
-                        self_wait_event(DATA_PACKET_RETRANSMISSION_OFFSET,NULL,DATA_PACKET_RETRANSMISSION_TIMER);
+                        wait_time(DATA_PACKET_RETRANSMISSION_OFFSET,NULL,DATA_PACKET_RETRANSMISSION_TIMER);
                 else{
 
                         /*
@@ -923,7 +923,7 @@ void receive_ack(bool is_packet_acknowledged){
          * current node and the recipient => extract the ID of the latter from the last data packet sent
          */
 
-        ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,true);
+        check_if_ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,true);
 
         /*
          * Finally, insert the current packet in the output cache => in such a way, we avoid forwarding duplicate packets

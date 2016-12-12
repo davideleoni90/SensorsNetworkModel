@@ -7,11 +7,16 @@
 
 /*
  * EVENT TYPES
+ *
+ * List of IDs associated to the events of the simulation
  */
 
 enum{
-        SEND_BEACON=1,
-        SEND_DATA_PACKET=2,
+        SEND_BEACONS_TIMER_FIRED=1, // The timer for beacons has been fired  => broadcast a beacon
+        UPDATE_ROUTE_TIMER_FIRED=2, // The timer for updating the route has been fired
+        SET_BEACONS_TIMER=3, // Update the interval of the timer for beacons
+        SEND_DATA_PACKET=4,
+        BEACON_RECEIVED=3, // A beacon has been received by the node
 };
 
 /*
@@ -109,10 +114,14 @@ typedef struct{
 
 /*
  * ROUTE INFO
+ *
+ * Structure describing the current path chosen by a node to send data packets
  */
 
 typedef struct{
-        unsigned int parent;
-        unsigned short etx;
-        bool congested;
+        unsigned int parent; // ID of the parent node
+        unsigned short etx; // ETX of the parent node + 1-hop ETX of the link to the parent node
+        //bool congested;
 }route_info;
+
+void wait_time(simtime_t interval,unsigned int type);

@@ -1,21 +1,20 @@
 /*
  * LINK ESTIMATOR
  *
- * This layer determines the quality of the communications links of the nodes: in particular, the quality is evaluated
+ * This layer determines the quality of the communication links of the nodes: in particular, the quality is evaluated
  * in terms of 1-hop ETX.
  *
- * The 1-hop ETX is computed from the number of beacons received and the number of successfully transmitted data packets
+ * The 1-hop ETX is computed from the number of beacons received by and the number of successfully transmitted data
+ * packets to the neighbor nodes.
  * The ingoing quality of the link is calculated as the ratio between the number of beacons sent by the neighbor and
  * the number of beacons actually received. The outgoing quality is calculated as the ratio between the number the
- * number of data packets sent to the neighbor and the number of acks received from him.
+ * number of data packets sent to the neighbor and the number of acknowledgments received from him.
  *
  * All the above information are stored in the LINK ESTIMATOR TABLE (or NEIGHBOR TABLE), with one entry for each of the
  * neighbors of the node
  *
- * The ROUTING ENGINE relies on the layer provided by the LINK ESTIMATOR in order to send routing beacons. On the other
- * side, when a node receives a beacon, the information contained are used to update the link estimator table: this
- * table contains a list of the neighbors of a node along with information like the 1-hop ETX. This table is created
- * and updated by the link estimator layer.
+ * The ROUTING ENGINE relies on the layer provided by the LINK ESTIMATOR to send routing beacons. On the other side,
+ * when a node receives a beacon, the information contained are used to update the link estimator table.
  */
 
 #include "link_estimator.h"
@@ -854,7 +853,7 @@ void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon){
          * new brodcast event
          */
 
-        broadcast_event(&beacon,BEACON_PACKET);
+        broadcast_event(&beacon,SEND_BEACON);
 }
 
 /*
@@ -1231,11 +1230,11 @@ void update_neighbor_entry(unsigned char index, unsigned char seq){
  * @link_estimator_frame: pointer to the link estimator frame of the beacon received by the node
  */
 
-void process_received_beacon(physical_frame* physical_link_frame,ctp_link_estimator_frame* link_estimator_frame){
+void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_link_estimator_frame* link_estimator_frame){
 
         /*
-         * Index of the entry corresponding to the neighbor that sent the message: if no message had ever been received
-         * by the sender, such an index will not be found and a new entry has to be created
+         * Index of the entry int the neighbor table corresponding sender: had no message ever been received from  the
+         * sender, such an index would not be found and a new entry would have to be created
          */
 
         unsigned char index;
@@ -1250,16 +1249,16 @@ void process_received_beacon(physical_frame* physical_link_frame,ctp_link_estima
          * Check if it is a broadcast message or a unicast message
          */
 
-        if(physical_link_frame->dst.ID==BROADCAST_ADDRESS){
+        if(phy_mac_overhead->dst.ID==BROADCAST_ADDRESS){
 
                 /*
                  * It's a broadcast message; get the identity of the sender
                  */
 
-                sender=physical_link_frame->src;
+                sender=phy_mac_overhead->src;
 
                 /*
-                 * Get the index of the entry in the estimator table that matches the identity of the sender
+                 * Get the index of the entry in the estimator table that matches the sender
                  */
 
                 index=find_estimator_entry(sender.ID);
@@ -1280,7 +1279,7 @@ void process_received_beacon(physical_frame* physical_link_frame,ctp_link_estima
                 else{
 
                         /*
-                         * No entry corresponding to the sender has been found => this is the first message received by
+                         * No entry corresponding to the sender has been found => this is the first message received from
                          * him and a corresponding entry has to be created => look for a free entry in the neighbor
                          * table
                          */
@@ -1353,28 +1352,33 @@ void process_received_beacon(physical_frame* physical_link_frame,ctp_link_estima
                                          * ask whether the channel to the sender has a high quality: if so the beacon
                                          * would be further processed, otherwise it would be dropped.
                                          *
-                                         * This model ignores the white bit is not considered and a beacon is further
-                                         * processed.
+                                         * This model ignores the white bit, so a beacon is always further processed.
                                          *
-                                         * In particular, the link estimator asks the ROUTING LAYER whether the sender
-                                         * of the beacon should be inserted in the estimator table or not: if so, a
-                                         * random entry is replaced with the entry for the new neighbor
+                                         * In particular, a random entry is (hopefully) selected and replaced with the
+                                         * entry for the new neighbor => get the index of random entry to be evicted
                                          */
-
-
 
                                         index=find_random_entry();
 
                                         /*
-                                         * Check if an entry VALID AND NOT PINNED NOR MATURE exists
+                                         * Check if an entry VALID AND NOT PINNED NOR MATURE exists; if this is not the
+                                         * case, the LINK ESTIMATOR discards the beacon
                                          */
 
                                         if(index!=INVALID_ENTRY){
 
-                                                //TODO evict
+                                                /*
+                                                 * A victim entry has been randomly found => first notify the ROUTING
+                                                 * ENGINE about the fact that the neighbor corresponding to the entry
+                                                 * has been removed from the estimator table; in fact, SUCH A NEIGHBOR
+                                                 * IS NO LONGER ELIGIBLE AS A PARENT, SO IT HAS TO BE REMOVED FROM THE
+                                                 * ROUTING TABLE
+                                                 */
+
+                                                neighbor_evicted(sender.ID);
 
                                                 /*
-                                                 * Initialize the new entry
+                                                 * Replace the victim entry with the one of the new neighbor
                                                  */
 
                                                 init_estimator_entry(sender,index);
@@ -1391,10 +1395,10 @@ void process_received_beacon(physical_frame* physical_link_frame,ctp_link_estima
 /*
  * RECEIVE BEACON
  *
- * When an event with type BEACON_PACKET is delivered to the node (logic process), this function is invoked to process
- * the received message. The LINK estimator is in charge of extracting the physical and link estimator frames from the
- * message and use the contained info to keep the neighbor table up to date. Then message is then passed to the upper
- * layer of the CTP stack, the ROUTINE ENGINE, to be further processed
+ * When an event with type BEACON_RECEIVED is delivered to the node (logic process), this function is invoked to process
+ * the message. The LINK estimator is in charge of extracting the physical and link estimator frames and use the contained
+ * pieces of information to keep the neighbor table up to date. Then message is then passed to the upper layer of the
+ * CTP stack, the ROUTINE ENGINE, to be further processed
  *
  * @message: the payload from the content of the event delivered to the node
  */
@@ -1412,13 +1416,13 @@ void receive_routing_packet(void* message){
          * (LINK ESTIMATOR)
          */
 
-        process_received_beacon(&beacon.physical_link_frame,&beacon.link_estimator_frame);
+        process_received_beacon(&beacon.phy_mac_overhead,&beacon.link_estimator_frame);
 
         /*
          * Then extract the routing layer frame and pass it to the ROUTING ENGINE
          */
 
-        receive_beacon(&beacon.routing_frame,beacon.physical_link_frame.src.ID);
+        receive_beacon(&beacon.routing_frame,beacon.phy_mac_overhead.src.ID);
 }
 
 /*

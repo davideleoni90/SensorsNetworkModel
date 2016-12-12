@@ -3,10 +3,18 @@
 #include <string.h>
 #include <ROOT-Sim.h>
 #include "application.h"
+#include "routing_engine.h"
 
 simtime_t timestamp; // Value of the local virtual clock
+node me; // ID and coordinates of this node (logical process)
 
 void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_content, unsigned int size, void *ptr) {
+
+        /*
+         * Update the virtual clock of this logical process (node)
+         */
+
+        timestamp=now;
 
         lp_state_type *state;
         state = (lp_state_type*)ptr;
@@ -83,6 +91,56 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         break;
 
+                case UPDATE_ROUTE_TIMER_FIRED:
+
+                        /*
+                         * It's time for the ROUTING ENGINE to update the route of the node => invoke the dedicated
+                         * function.
+                         */
+
+                        update_route();
+
+                        /*
+                         * The time simulated through this event is periodic => schedule this event after the same amount
+                         * of time, starting from now
+                         */
+
+                        wait_time(UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
+                        break;
+
+                case SEND_BEACONS_TIMER_FIRED:
+
+                        /*
+                         * It's time for the ROUTING ENGINE to send a beacon to its neighbors => before doing this,
+                         * update the route, so that information reported in the beacon will not be obsolete
+                         */
+
+                        update_route();
+
+                        /*
+                         * Now send the beacon
+                         */
+
+                        send_beacon();
+
+                        /*
+                         * The interval of the timer that schedules the sending of beacons is continuously changing, in
+                         * such a way that beacons are sent with decreasing frequency => schedule an update of the
+                         * timer, i.e. advance in the virtual time until the moment when the timer has to be updated
+                         */
+
+                        schedule_beacons_interval_update();
+                        break;
+
+                case SET_BEACONS_TIMER:
+
+                        /*
+                         * This event is processed when the interval associated to the timer for beacons has to be
+                         * updated
+                         */
+
+                        double_beacons_send_interval();
+                        break;
 
                 default:
                         fprintf(stdout, "PCS: Unknown event type! (me = %d - event type = %d)\n", me, event_type);
@@ -96,4 +154,31 @@ bool OnGVT(unsigned int me, lp_state_type *snapshot) {
 
         return true;
 }
+
+/*
+ * SIMULATION API - start
+ */
+
+/*
+ * WAIT TIME
+ *
+ * This function is used to simulate a timer: the logical process (node) has to wait for the given interval of time =>
+ * it schedules an event that it itself will process after the given interval of time
+ *
+ * @interval: the interval of time the logical process has to wait for
+ * @type: ID corresponding to the event => it is necessary for the logical process for deciding what to do next
+ */
+
+void wait_time(simtime_t interval,unsigned int type){
+
+        /*
+         * Schedule a new event after "interval" instants of virtual time; no parameters are provide with the event
+         */
+
+        ScheduleNewEvent(me.ID,timestamp+interval,type,NULL,0);
+}
+
+/*
+ * SIMULATION API - start
+ */
 
