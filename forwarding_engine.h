@@ -7,6 +7,7 @@
 
 enum{
         FORWARDING_QUEUE_DEPTH=13, // Max number of packets that can be stored in the forwarding queue at the same time
+        FORWARDING_POOL_DEPTH=13, // Max number of packets that can be stored in the forwarding pool at the same time
         CACHE_SIZE=4, // Max number of packets that can be stored in the output cache at the same time
         MAX_RETRIES=30, // Max number of times the forwarding engine will try to transmit a packet before giving up
 
@@ -16,15 +17,30 @@ enum{
          * and reacts properly
          */
 
-                DATA_PACKET_ACK_OFFSET=50,
+        DATA_PACKET_ACK_OFFSET=50,
 
         /*
          * Interval of time after which the node tries to resend a data packet that has not been acknowledged
          */
 
-                DATA_PACKET_RETRANSMISSION_OFFSET=50,
+        DATA_PACKET_RETRANSMISSION_OFFSET=50,
+
+        /*
+         * Interval of time after which the node tries to resend a data packet in case it has not chosend a parent yet
+         */
+
+        NO_ROUTE_INTERVAL=100,
         MIN_PAYLOAD=0, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
+};
+
+/*
+ * FORWARDING ENGINE STATE FLAGS
+ */
+
+enum{
+        SENDING=0x10, // Busy sending a data packet => wait before send another packet
+        ACK_PENDING=0x8 // Waiting for the last sent data packet to be acknowledged
 };
 
 /*
@@ -48,6 +64,7 @@ typedef struct {
 
 /* FORWARDING ENGINE API */
 
-bool send_data_packet();
+bool create_data_packet();
 void receive_ack(bool is_packet_acknowledged);
-bool forward_data_packet();
+bool send_data_packet();
+bool forward_data_packet(ctp_data_packet* packet);

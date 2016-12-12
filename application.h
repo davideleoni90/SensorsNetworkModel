@@ -14,9 +14,11 @@
 enum{
         SEND_BEACONS_TIMER_FIRED=1, // The timer for beacons has been fired  => broadcast a beacon
         UPDATE_ROUTE_TIMER_FIRED=2, // The timer for updating the route has been fired
-        SET_BEACONS_TIMER=3, // Update the interval of the timer for beacons
-        SEND_DATA_PACKET=4,
-        BEACON_RECEIVED=3, // A beacon has been received by the node
+        SET_BEACONS_TIMER=3, // The interval of the timer for beacons has to be updated
+        DATA_PACKET_RECEIVED=4, // The node has received a data packet
+        BEACON_RECEIVED=5, // The node has received a data packet
+        RETRANSMITT_DATA_PACKET=6, // Try to re-send a data packet whose first sending attempt failed
+        CHECK_ACK_RECEIVED=7, // After the maximum time for receiving an ack has passed, check wheter it has been received
 };
 
 /*
@@ -27,7 +29,13 @@ enum{
         CTP_ROOT=3,
         CTP_PULL= 0x80, // TEP 123: P field
         CTP_CONGESTED= 0x40, // TEP 123: C field
-        BROADCAST_ADDRESS=0xffff
+        BROADCAST_ADDRESS=0xffff, // A packet with such an address is sent to all the neighbor nodes
+
+        /*
+         * Lower bound of data packets received by the root for the simulation to stop
+         */
+
+        COLLECTED_DATA_PACKETS_GOAL=10
 };
 
 /*
@@ -125,3 +133,4 @@ typedef struct{
 }route_info;
 
 void wait_time(simtime_t interval,unsigned int type);
+void collected_data_packet(ctp_data_packet* packet);

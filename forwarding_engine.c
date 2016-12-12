@@ -3,24 +3,15 @@
  *
  * Its main task is forwarding data packets received from neighbors as well as sending packets created by the node
  * itself. Moreover, it is in charge of detect duplicate packets and routing loops. Finally, it snoops data packets
- * directed to other nodes in order to detect a congestion status.
+ * directed to other nodes
  *
  * The forwarding engine has a FIFO queue of fixed depth at its disposal to store packets before forwarding them: here
  * packets are both those coming from other neighbors and those created by the node itself.
  * TODO we allow only one data packet at a time
  *
- * Before actually sending a packet, it checks whether the parent is congested: if so, it holds on until congestion is
- * over or a new parent is selected.
- *
  * The forwarding engine waits for an acknowledgment for each packet sent => if this is not received within a certain
  * timeout, it tries to retransmit the packet for a limited number of times: if no acknowledgement is ever received, the
  * packet is discarded.
- *
- * It also deals with congestion of the node, namely when the packets queue is full and thus no new packets can be
- * forwarded => as soon as the input queue is half full, the forwarding engine sets the CONGESTION FLAG in the forwarded
- * data packets; also the ROUTING ENGINE is notified about the the congestion, hence it sets the CONGESTION FLAG in the
- * routing packets => in this way,the load is uniformly distributed among the nodes of the collection tree. Congestion
- * of a node can be quickly determined not only reading the CONGESTION FLAG from the packets, but also SNOOPING PACKETS
  *
  * The forwarding engine is also capable of detecting duplicated packets. In fact, the tuple <Origin,SeqNo,THL> identify
  * a packet uniquely => comparing each received data packet with those in the forwarding queue, it is possible to say
@@ -39,14 +30,135 @@
 #include "forwarding_engine.h"
 #include "routing_engine.h"
 #include "link_estimator.h"
+#include "application.h"
 
 /*
- * DATA FRAME
+ * FORWARDING POOL - start
  *
- * Pointer to the routing frame of the next routing packet to be sent
+ * When a data packet has to be forwarded, the node extracts one entry from this pool, initializes it to the data of
+ * the data packet received and finally stores the entry in the forwarding queue.
+ *
+ * The pool is nothing more than fixed-size array, whose elements are of type "forwarding_queue_entry": in fact packets
+ * to be forwarded are stored in the same output queue as packets created by the node itself and as soon as they reach
+ * the head of the queue they are sent.
+ *
+ * An entry is taken from the pool using the "get" method and one is given back to the pool using the "put" method: the
+ * entries are taken in order, according to their position, and are released in order.
+ *
+ * Two variables help handling the pool:
+ *
+ * 1-forwarding_pool_free
+ * 2-forwarding_pool_index
  */
 
-//ctp_data_frame* data_frame;
+forwarding_queue_entry forwarding_pool[FORWARDING_POOL_DEPTH];
+unsigned char forwarding_pool_count=FORWARDING_POOL_DEPTH; // Number of elements in the pool
+unsigned char forwarding_pool_index=0; // Index of the array where the next entry put will be collocated
+
+/*
+ * FORWARDING POOL - GET ENTRY
+ *
+ * Get an entry from the pool; it's the one at the position indicated by the variable "forwarding_pool_index"
+ */
+
+forwarding_queue_entry forwarding_pool_get(){
+
+        /*
+         * An entry can be obtained only if the pool is not empty => check the counter
+         */
+
+        if(forwarding_pool_count){
+
+                /*
+                 * The return value: the entry corresponding to element "index" of the pool
+                 */
+
+                forwarding_queue_entry entry=forwarding_pool[forwarding_pool_index];
+
+                /*
+                 * Set the "index" variable to the next available entry of the pool
+                 */
+
+                forwarding_pool_index++;
+
+                /*
+                 * Reduce by one the counter of entries in the pool
+                 */
+
+                forwarding_pool_count--;
+
+                /*
+                 * If "index" is now beyond the limit of the pool, set it to the first position
+                 */
+
+                if(forwarding_pool_index==FORWARDING_POOL_DEPTH)
+                        forwarding_pool_index=0;
+
+                /*
+                 * Return the entry
+                 */
+
+                return entry;
+        }
+        else
+                /*
+                 * Empty pool
+                 */
+
+                return NULL;
+}
+
+/*
+ * FORWARDING POOL - PUT ENTRY
+ *
+ * Add an entry to the pool in the first available position
+ */
+
+void forwarding_pool_put(forwarding_queue_entry entry){
+
+        /*
+         * Index of the first free plac where the entry will be stored
+         */
+
+        unsigned char index;
+
+        /*
+         * Check if the pool is full: an entry can be added only if not full
+         */
+
+        if(forwarding_pool_count<FORWARDING_POOL_DEPTH){
+
+                /*
+                 * Get the index of a free position in the pool where the entry can be stored
+                 */
+
+                index=forwarding_pool_count+forwarding_pool_index;
+
+                /*
+                 * If the index is beyond the limit of the pool, correct it
+                 */
+
+                if(index>=FORWARDING_POOL_DEPTH)
+                        index-=FORWARDING_POOL_DEPTH;
+
+                /*
+                 * Put the given entry in the first free place
+                 */
+
+                forwarding_pool[index]=entry;
+
+                /*
+                 * Increase by one the counter of elements in the pool
+                 */
+
+                forwarding_pool_count++;
+        }
+
+}
+
+/*
+ * FORWARDING POOL - end
+ */
 
 /*
  * DATA PACKET
@@ -56,9 +168,18 @@
 
 ctp_data_packet data_packet;
 
+/*
+ * LOCAL FORWARDING QUEUE ENTRY
+ *
+ * The entry of the forwarding queue associated to the current node when this has some data to be sent
+ */
+
+forwarding_queue_entry local_entry;
+
 unsigned char self; // ID of the current node
 bool is_root; // Boolean variable which is set if the current node is the root of the collection tree
 unsigned char seqNo=0; // Sequence number of the packet to be sent (initially 0)
+unsigned char state=0; // Combination of flags indicating the state of the FORWARDING ENGINE; at first is 0
 
 /*
  * FORWARDING QUEUE - start
@@ -112,10 +233,13 @@ bool forwarding_queue_enqueue(forwarding_queue_entry* entry){
 
                 /*
                  * There's enough space in the queue for at least one new element => insert the new element at position
-                 * determined by the "tail" variable
+                 * determined by the "tail" variable => initialize the entry in the queue to the values of the given
+                 * entry
                  */
 
-                forwarding_queue[forwarding_queue_tail]=*entry;
+                forwarding_queue[forwarding_queue_tail].data_packet=entry->data_packet;
+                forwarding_queue[forwarding_queue_tail].is_local=entry->is_local;
+                forwarding_queue[forwarding_queue_tail].retries=entry->retries;
 
                 /*
                  * Update the counter for the number of elements in the queue
@@ -260,6 +384,10 @@ bool forwarding_queue_lookup(ctp_data_packet_frame* data_frame){
  *
  * As a consequence, it is necessary to check the value of "output_cache_count" in order to determine whether the cache
  * is full or not.
+ *
+ * When a packet is inserted in the cache, it means it has been used => if the same packet is already in the cache, it
+ * is moved in order to indicate that it has been recently accessed, otherwise the element that was least recently
+ * used is removed
  */
 
 ctp_data_packet output_cache[CACHE_SIZE];
@@ -270,10 +398,12 @@ unsigned char output_cache_first; // Index of the entry in the cache that was le
 /*
  * OUTPUT CACHE - LOOKUP
  *
- * Returns the index of the given data packet is it's in the output cache, i.e. it has recently been sent, the counter
- * of elements in the cache otherwise
+ * Returns the index of the given data packet if it's in the output cache, i.e. it has recently been sent, and the
+ * counter of elements in the cache otherwise
  *
  * @data_frame: the data frame of the packet to be looked up
+ *
+ * NOTE: the index is returned as offset from the position of the least recently added element of the cache
  */
 
 unsigned char cache_lookup(ctp_data_packet_frame* data_frame){
@@ -330,7 +460,7 @@ unsigned char cache_lookup(ctp_data_packet_frame* data_frame){
  * OUTPUT CACHE - ENQUEUE
  *
  * Adds a new entry in the output cache.
- * If there's no space left for the packet, since the cache adopts a LRU logics, the least recently inserted packet is
+ * If there's no space left for the packet, since the cache adopts a LRU logic, the least recently inserted packet is
  * removed from the cache to free space for the new packet to be inserted
  *
  * @data_frame: the data frame of the packet to be inserted
@@ -343,6 +473,12 @@ void cache_enqueue(ctp_data_packet_frame* data_frame){
          */
 
         unsigned char i;
+
+        /*
+         * Pointer to the data frame of the element of the cache analyzed
+         */
+
+        ctp_data_packet_frame* new_data_frame;
 
         /*
          * Check whether the cache is full
@@ -359,46 +495,41 @@ void cache_enqueue(ctp_data_packet_frame* data_frame){
 
                 /*
                  * If the packet was not already in the cache, "i" is set to the number of packets cached => the first
-                 * element (least recently inserted) is removed
+                 * element (least recently inserted) is removed.
+                 * If the packet was already in the cache, "i" is set to its offset w.r.t. the least recently added
+                 * element => the packet is removed from the cache before being re-inserted
                  */
 
                 cache_remove(i%output_cache_count);
         }
 
         /*
-         * Scan the outuput cache until an item matching the searched packet is found
+         * Get the data frame of the entry where the most recently accessed element will be put
          */
 
-        for(i=0;i<CACHE_SIZE;i++){
-
-                /*
-                 * The data frame of the element of the cache analyzed
-                 */
-
-                ctp_data_packet_frame current=output_cache[i].data_packet_frame;
-
-                /*
-                 * If the current element matches the given packet return true
-                 */
-
-                if(data_frame->THL==current.THL &&
-                   data_frame->origin==current.origin &&
-                   data_frame->seqNo==current.seqNo)
-
-                        return true;
-        }
+        new_data_frame=&output_cache[(output_cache_first+output_cache_count)%CACHE_SIZE].data_packet_frame;
 
         /*
-         * The searched packets has not been found => return false
+         * Set the new entry
          */
 
-        return false;
+        new_data_frame->THL=data_frame->THL;
+        new_data_frame->origin=data_frame->origin;
+        new_data_frame->seqNo=data_frame->seqNo;
+
+        /*
+         * Update the counter of elements in the cache
+         */
+
+        output_cache_count++;
 }
 
 /*
  * OUTPUT CACHE - REMOVE
  *
- * Remove the entry in the output cache at given offset with respect the index corresponding to "output_cache_first"
+ * Remove the entry in the output cache at given offset with respect the index corresponding to "output_cache_first".
+ * This function is called only when an element has to be inserted in the cache and this is full, so after an element is
+ * removed, a new element is inserted
  */
 
 void cache_remove(unsigned char offset){
@@ -413,7 +544,7 @@ void cache_remove(unsigned char offset){
          * Check if the given offset is valid, namely it's less than the number of entries in the cache
          */
 
-        if(i<output_cache_count)
+        if(offset<output_cache_count)
 
                 /*
                  * Given index does not correspond to any entry of the cache
@@ -422,19 +553,38 @@ void cache_remove(unsigned char offset){
                 return;
 
         /*
-         * If the given offset is 0, the packet to be removed is exactly the one at position indicated by the variable
-         * "output_cache_first" => it is necessary to shift by 1 this position
+         * If the given offset is 0, the packet to be removed is the one that was least recently added, which is at
+         * position indicated by the variable "output_cache_first" => the element that is about to be inserted is going
+         * to replace this element.
+         * It is necessary to shift "output_cache_first" by 1, so that the next element removed will always be the least
+         * recently accessed one.
          */
 
-        if(!index)
+        if(!offset)
                 output_cache_first=(++output_cache_first)%CACHE_SIZE;
         else{
 
                 /*
-                 * O
+                 * The element to be removed is not the least recently accessed one: this happens when an element that
+                 * is already in the cache has to be inserted again, namely it is accessed again => it has to be moved
+                 * to indicate that is the most recently accessed element of the cache; also the least recently accessed
+                 * element has to be removed
+                 *
+                 * In order to do this, all the elements of the cache are shifted backward by one position, without
+                 * changing the value of "output_cache_first" => the most recently accessed element will be inserted
+                 * before the least recently accessed one, pointed by the "output_cache_first" variable
                  */
 
+                for(i=offset;i<output_cache_count;i++){
+                        memcpy(&output_cache[(offset+i)%CACHE_SIZE],&output_cache[(offset+i+1)%CACHE_SIZE],sizeof(ctp_data_packet));
+                }
         }
+
+        /*
+         * Decrease by one the counter of packets in the cache
+         */
+
+        output_cache_count--;
 }
 
 /*
@@ -467,24 +617,24 @@ void init_forwarding_engine(unsigned int ID){
 }
 
 /*
- * FORWARD DATA PACKET
+ * SEND DATA PACKET
  *
- * This function is in charge of forwarding the first element of the output queue (the least recent added, because it
- * is a FIFO queue), if any..
+ * This function is in charge of forwarding the first element of the output queue (the least recently added, because it
+ * is a FIFO queue), if any.
  *
  * If the output queue contains at least one packet, the forwarding engine checks that a route exists towards the root
  * of the collection tree: if so, a few parameters are set for sending the packet and then it is sent. The forwarding
  * engine relies on the routing engine for a few pieces of information related to the path of the packet to be forwarded.
  *
- * This function removes packets from the output queue until one that is not a duplicated is found: this is forwarded
- * and the corresponding entry is not dequeued until it is  acknowledged
+ * This function removes packets from the output queue until one that is not a duplicated is found; the corresponding
+ * entry of the forwarding queue is not dequeued until the packet gets acknowledged by the intended recipient
  *
  * Returns true if the function has to be invoked again. This happens when the head of the queue is a duplicate: in fact
  * it is removed from the queue, so a further call to the queue can be made to forward the next packet (unless it is a
  * duplicate on its turn).
  */
 
-bool forward_data_packet() {
+bool send_data_packet() {
 
         /*
          * Value of the ETX of the current route
@@ -532,7 +682,7 @@ bool forward_data_packet() {
                  * time equal to NO_ROUTE_RETRY; during this time, hopefully the node has fixed its route.
                  */
 
-                //TODO schedule new event RETRY_FORWARDING
+                wait_time(NO_ROUTE_INTERVAL,RETRANSMITT_DATA_PACKET);
 
                 /*
                  * Return false, since an immediate further invocation will be of no help: it is necessary to wait at
@@ -556,7 +706,9 @@ bool forward_data_packet() {
         if(cache_lookup(&first_entry->data_packet->data_packet_frame)<output_cache_count){
 
                 /*
-                 * The packet is a duplicate => remove the corresponding entry from the output queue
+                 * The data packet is in the output cache => is a duplicate, namely it has already been sent by the
+                 * node => since DUPLICATES ARE ALLOWED ONLY IF PACKETS ARE FORWARDED, remove the entry of the current
+                 * packet from the output queue
                  */
 
                 forwarding_queue_dequeue();
@@ -579,11 +731,9 @@ bool forward_data_packet() {
         first_entry->data_packet->data_packet_frame.ETX=etx;
 
         /*
-         * Clear CONGESTION and PULL flags from the packets to be forwarded
-         * TODO check CONGESTION
+         * Clear PULL flag from the packets to be forwarded
          */
 
-        first_entry->data_packet->data_packet_frame.options&=~CTP_CONGESTED;
         first_entry->data_packet->data_packet_frame.options&=~CTP_PULL;
 
         /*
@@ -597,43 +747,44 @@ bool forward_data_packet() {
          * parent node reported in the physical layer frame of the packet
          */
 
-        unicast_event(&first_entry->data_packet,SEND_DATA_PACKET);
+        unicast_event(&first_entry->data_packet,DATA_PACKET_RECEIVED);
 
         /*
-         * Schedule a new event after time equal to the DATA_PACKET_ACK_OFFSET, destined to the current node, in order to
-         * simulate that the data packet may or may not be acknowledged by the link layer => this is crucial because
-         * this is how the link estimator evaluates the link quality to the recipient
+         * Schedule a new event after time equal to the ACK_TIMEOUT, destined to the current node, in order to
+         * simulate that the data packet may or may not be acknowledged by the link layer of the recipient.
+         * This is crucial because the link estimator evaluates the link quality to the recipient also on the basis of
+         * acks received
          */
 
-        wait_time(DATA_PACKET_ACK_OFFSET,&parent,DATA_PACKET_ACK_INTERVAL);
+        wait_time(DATA_PACKET_ACK_OFFSET,CHECK_ACK_RECEIVED);
+
+        /*
+         * The data packet has been sent => no need to re-execute this function
+         */
+
+        return false;
 }
 
 /*
- * SEND DATA PACKET
+ * CREATE DATA PACKET
  *
- * Create a well-formed data packet (see its definition in "application.h") out of a payload (the data node has collected
- * and is willing to deliver to the root of the collection tree) and add it to the forwarding queue.
+ * Create a well-formed data packet (see its definition in "application.h") out of a payload (the data that node has
+ * collected and is willing to deliver to the root of the collection tree) and add it to the forwarding queue.
  * The payload here is simulated as a random value within a given range.
  * Packets in the forwarding queue are forwarded, one at a time, according to a FIFO logic => after having queued up
- * the packet, forward the packet at the head of the queue.
+ * a new packet, forward the one that currently is at the head of the queue.
  * This function can't be invoked by the root node, because this only collects data from the collection tree
  *
- * Returns true if the data packet is successfully sent, false otherwise
+ * Returns true if the data packet is successfully enqueued in the forwarding queue,i.e this is not full,false otherwise
  */
 
-bool send_data_packet(){
+bool create_data_packet(){
 
         /*
          * Pointer to the data frame of the next data packet to send
          */
 
         ctp_data_packet_frame* data_frame;
-
-        /*
-         * Entry of the output queue associated to the next packet to be sent
-         */
-
-        forwarding_queue_entry entry;
 
         /*
          * Set the payload of the data packet to be sent
@@ -678,33 +829,33 @@ bool send_data_packet(){
                  * Initialize the dedicated pointer to the data packet the entry corresponds to
                  */
 
-                entry.data_packet = &data_packet;
+                local_entry.data_packet = &data_packet;
 
                 /*
                  * Set the number of transmission attempt to its maximum value: every time a transmission fails, this
                  * counter is decreased and when it's equal to 0 the packet is dropped
                  */
 
-                entry.retries = MAX_RETRIES;
+                local_entry.retries = MAX_RETRIES;
 
                 /*
                  * Set the flag indicating that this node created the packet to be sent
                  */
 
-                entry.is_local=true;
+                local_entry.is_local=true;
 
                 /*
                  * Insert the entry for the packet to be sent in the forwarding queue: we have already seen that the
                  * queue is not full, so we don't further check the return value of the following call
                  */
 
-                forwarding_queue_enqueue(&entry);
+                forwarding_queue_enqueue(&local_entry);
 
                 /*
-                 * Now that the packet has been successfully queued up, forward the head packet
+                 * Now that the packet has been successfully queued up, it's time to send the data packet
                  */
 
-                forward_data_packet();
+                send_data_packet();
 
                 /*
                  * Packet successfully added to the forwarding queue => return true
@@ -723,8 +874,9 @@ bool send_data_packet(){
 /*
  * RECEIVE DATA PACKET
  *
- * When an event with type DATA_PACKET is delivered to the node (logic process), this function is invoked to process
- * the received message.
+ * When an event with type DATA_PACKET_RECEIVED is delivered to the node (logic process), this function is invoked to
+ * process the received message; after the processing, the packet is forwarded to neighbor nodes, so that it will
+ * hopefully reach the root node sooner or later.
  *
  * A check is made to detect if the message is duplicated => we check both the output queue and the cache with the most
  * recently forwarded packets, hence it is possible to detect duplicates also after they have been sent
@@ -814,11 +966,15 @@ bool receive_data_packet(void* message) {
                  * that are read in order to decide whether the simulation has come to and end or not
                  */
 
-                //TODO schedule event to signal root reception
+                collected_data_packet(&packet);
         }
         else{
 
-                //TODO forward the packet
+                /*
+                 * Forward the data packet received
+                 */
+
+                forward_data_packet(&data_packet);
         }
 
         /*
@@ -826,6 +982,38 @@ bool receive_data_packet(void* message) {
          */
 
         return true;
+}
+
+/*
+ * FORWARD DATA PACKET
+ *
+ * Forward the given data packet => this means getting an entry from the forwarding pool and addin it to the forwarding
+ * queue
+ *
+ * @packet: pointer to to the packet to be forwarded
+ */
+
+bool forward_data_packet(ctp_data_packet* packet){
+
+        /*
+         * Check that the forwarding is not empty, otherwise the packet can't be forwarded
+         */
+
+        if(forwarding_pool_count){
+
+                /*
+                 * The entry corresponding to the packet to be forwarded
+                 */
+
+                forwarding_queue_entry entry;
+
+                /*
+                 * Get the entry from the pool
+                 */
+
+                entry=forwarding_pool_get();
+
+        }
 }
 
 /*

@@ -7,6 +7,8 @@
 
 simtime_t timestamp; // Value of the local virtual clock
 node me; // ID and coordinates of this node (logical process)
+unsigned char collected_packets; // The number of packets successfully delivered by the root of the collection tree
+bool root; // Boolean variable that is set to true if the node is designated root of the collection tree
 
 void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_content, unsigned int size, void *ptr) {
 
@@ -149,10 +151,39 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
         }
 }
 
+/*
+ * TERMINATE SIMULATION?
+ *
+ * By mean of this function, each logic process (node of the sensors network) tells the simulator whether, according to
+ * him, the simulation should terminate, also considering the given state of the simulation; the latter actually stops
+ * when all the logic processes return true.
+ *
+ * The aim of this model is to simulate the implementation of the Collection Tree Protocol (CTP) => we stop when the
+ * root node has received a number of data packets greater than or equal to COLLECTED_DATA_PACKETS_GOAL.
+ * As a consequence, all the logic processes associated to nodes of the collection tree will always return true here,
+ * while the logic process associated to the root will return true iff the number of data packets collected is greater
+ * than or equal to COLLECTED_DATA_PACKETS_GOAL
+ *
+ */
 
-bool OnGVT(unsigned int me, lp_state_type *snapshot) {
 
-        return true;
+bool OnGVT(unsigned int me, void*snapshot) {
+
+        /*
+         * If the current node is the root of the collection tree, check the number of data packets received
+         */
+
+        if(root){
+                if(collected_packets>=COLLECTED_DATA_PACKETS_GOAL)
+                        return true;
+        }
+
+        /*
+         * The node is not the root or is the root but the number of data packets collected is not yet sufficient to
+         * stop the simulation
+         */
+
+        return false;
 }
 
 /*
@@ -177,6 +208,15 @@ void wait_time(simtime_t interval,unsigned int type){
 
         ScheduleNewEvent(me.ID,timestamp+interval,type,NULL,0);
 }
+
+/*
+ * DATA PACKET COLLECTED
+ *
+ * This function is called by the root of the collection tree when it receives a data packet => update the counter of the
+ * message successfully collected.
+ *
+ * When the number of packet successfully collected reaches the planned value, the simulation stops
+ */
 
 /*
  * SIMULATION API - start

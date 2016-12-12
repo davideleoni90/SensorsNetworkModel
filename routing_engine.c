@@ -154,7 +154,6 @@ void start_routing_engine(unsigned int ID){
 void init_route_info(route_info * route) {
         route->parent= INVALID_ADDRESS; // ID of the parent of the node associated to the entry
         route->etx = 0; // multi-hop etx of the node
-        //route->congested = false;
 }
 
 /*
