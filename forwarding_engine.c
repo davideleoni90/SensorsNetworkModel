@@ -707,8 +707,7 @@ bool send_data_packet() {
 
                 /*
                  * The data packet is in the output cache => is a duplicate, namely it has already been sent by the
-                 * node => since DUPLICATES ARE ALLOWED ONLY IF PACKETS ARE FORWARDED, remove the entry of the current
-                 * packet from the output queue
+                 * node => remove the entry of the current packet from the output queue
                  */
 
                 forwarding_queue_dequeue();

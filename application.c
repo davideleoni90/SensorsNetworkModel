@@ -1,85 +1,114 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <ROOT-Sim.h>
 #include "application.h"
-#include "routing_engine.h"
 
-simtime_t timestamp; // Value of the local virtual clock
-node me; // ID and coordinates of this node (logical process)
 unsigned char collected_packets; // The number of packets successfully delivered by the root of the collection tree
-bool root; // Boolean variable that is set to true if the node is designated root of the collection tree
 
 void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_content, unsigned int size, void *ptr) {
 
         /*
-         * Update the virtual clock of this logical process (node)
+         * Pointer to the object representing the state of this logical process (node)
          */
 
-        timestamp=now;
+        node_state *state;
 
-        lp_state_type *state;
-        state = (lp_state_type*)ptr;
+        /*
+         * Initialize the local pointer to the pointer provided by the simulator
+         */
+
+        state = (node_state*)ptr;
+
+        /*
+         * Check whether the state object has already been set: if so, update the the local virtual time
+         */
+
+        if(state)
+                state->lvt=now;
+
+        /*
+         * Depending on the event type, perform different tasks
+         */
+
         switch(event_type) {
 
                 case INIT:
 
-                        // Initialize the LP's state
-                        state = (lp_state_type *)malloc(sizeof(lp_state_type));
+
+                        /*
+                         * NODE INITIALIZATION
+                         *
+                         * This is the default event signalled by the simulator to each logical process => it triggers
+                         * the initialization phase.
+                         *
+                         * In this phase, the parameters of the simulation should be parsed but, most importantly, a new
+                         * state object is dynamically allocated and its address is communicated to the simulator by
+                         * mean of the API function "SetState" => in this way the simulator is aware of the memory
+                         * address of the state object of processes, so it can transparently bring it back to a previous
+                         * configuration in case of inconsistency problems.
+                         *
+                         * Besides this operations, which are common to any model, this specific model requires the
+                         * initialization of the Collection Tree Protocol (CTP) stack.
+                         */
+
+                        /*
+                         * Coordinates of the the node
+                         */
+
+                        node_coordinates coordinates;
+
+                        /*
+                         * Dynamically allocate the state object
+                         */
+
+                        state = (node_state *)malloc(sizeof(node_state));
                         if (state == NULL){
                                 printf("Out of memory!\n");
                                 exit(EXIT_FAILURE);
                         }
 
+                        /*
+                         * The state object has been successfully allocated => tell its address to the simulator
+                         */
+
                         SetState(state);
 
-                        bzero(state, sizeof(lp_state_type));
-                        state->channel_counter = CHANNELS_PER_CELL;
+                        /*
+                         * Initialize the state structure
+                         */
 
-                        // Read runtime parameters
-                        if(IsParameterPresent(event_content, "pcs_statistics"))
-                                pcs_statistics = true;
+                        bzero(state, sizeof(node_state));
 
-                        if(IsParameterPresent(event_content, "ta"))
-                                state->ref_ta = state->ta = GetParameterDouble(event_content, "ta");
-                        else
-                                state->ref_ta = state->ta = TA;
+                        /* GET PARAMETERS OF THE SIMULATION - start */
 
-                        if(IsParameterPresent(event_content, "ta_duration"))
-                                state->ta_duration = GetParameterDouble(event_content, "ta_duration");
-                        else
-                                state->ta_duration = TA_DURATION;
+                        /* GET PARAMETERS OF THE SIMULATION - end */
 
-                        if(IsParameterPresent(event_content, "ta_change"))
-                                state->ta_change = GetParameterDouble(event_content, "ta_change");
-                        else
-                                state->ta_change = TA_CHANGE;
+                        /* SET PARAMETERS OF THE SIMULATION - start */
 
-                        if(IsParameterPresent(event_content, "channels_per_cell"))
-                                state->channels_per_cell = GetParameterInt(event_content, "channels_per_cell");
-                        else
-                                state->channels_per_cell = CHANNELS_PER_CELL;
+                        /*
+                         * Ask the simulator for the coordinates of this node
+                         */
 
-                        if(IsParameterPresent(event_content, "complete_calls"))
-                                complete_calls = GetParameterInt(event_content, "complete_calls");
+                        get_coordinates();
 
-                        state->fading_recheck = IsParameterPresent(event_content, "fading_recheck");
-                        state->variable_ta = IsParameterPresent(event_content, "variable_ta");
+                        /* SET PARAMETERS OF THE SIMULATION - end */
+
+                        /*
+                         * Initialize the LINK ESTIMATOR => set the sequence number of the beacons to 0
+                         */
+
+                        state->beacon_sequence_number=0;
+
+                        /*
+                         * Initialize the ROUTING ENGINE
+                         */
+
 
 
                         // Show current configuration, only once
                         if(me == 0) {
-                                printf("CURRENT CONFIGURATION:\ncomplete calls: %d\nTA: %f\nta_duration: %f\nta_change: %f\nchannels_per_cell: %d\nfading_recheck: %d\nvariable_ta: %d\n",
-                                       complete_calls, state->ta, state->ta_duration, state->ta_change, state->channels_per_cell, state->fading_recheck, state->variable_ta);
-                                fflush(stdout);
+                                printf("CURRENT CONFIGURATION:\n");
                         }
-
-                        state->channel_counter = state->channels_per_cell;
-
-                        // Setup channel state
-                        state->channel_state = malloc(sizeof(unsigned int) * 2 * (CHANNELS_PER_CELL / BITS + 1));
-                        for (w = 0; w < state->channel_counter / (sizeof(int) * 8) + 1; w++)
-                                state->channel_state[w] = 0;
 
                         // Start the simulation
                         timestamp = (simtime_t) (20 * Random());
@@ -186,9 +215,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
         return false;
 }
 
-/*
- * SIMULATION API - start
- */
+/* SIMULATION API - start */
 
 /*
  * WAIT TIME
@@ -218,7 +245,52 @@ void wait_time(simtime_t interval,unsigned int type){
  * When the number of packet successfully collected reaches the planned value, the simulation stops
  */
 
+/* SIMULATION API - end */
+
+/* SIMULATION FUNCTIONS - start */
+
 /*
- * SIMULATION API - start
+ * PARSE CONFIGURATION FILE
+ *
+ * Read the configuration file in order to determine:
+ *
+ * 1-the number of nodes involved in the simulation of the sensors network
+ * 2-the coordinates of the nodes
+ *
+ * @path: filename of the configuration file
+ *
+ * Returns the number of nodes parsed from the configuration file
+ *
+ * NOTE: THE CONFIGURATION FILE HAS TO BE IN THE SAME DIRECTORY AS THE MODEL BEING RUN
  */
+
+unsigned int parse_configuration_file(const char* path){
+
+        /*
+         * File pointer object of the configuration file
+         */
+
+        FILE* file;
+
+        /*
+         * Get the file object in READ_ONLY mode
+         */
+
+        file=fopen(path,"r");
+
+        /*
+         * Check if the file has been successfully opened: if not, exit with error
+         */
+}
+
+/*
+ * GET COORDINATES
+ *
+ * Randomly assign coordinates to the node
+ */
+
+void get_coordinates(node_coordinates* coordinates){
+
+}
+/* SIMULATION FUNCTIONS - end */
 

@@ -1,5 +1,5 @@
 #include <stdbool.h>
-#include "application.h"
+//#include "application.h"
 
 /*
  * CONSTANTS RELATED TO FORWARDING
@@ -123,13 +123,14 @@ typedef struct _link_estimator_table_entry{
 
 /* LINK ESTIMATOR API */
 
-unsigned short get_one_hop_etx(unsigned int address);
-bool unpin_neighbor(unsigned int address);
-bool pin_neighbor(unsigned int address);
-bool clear_data_link_quality(unsigned int address);
-void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon);
+unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* link_estimator_table);
+bool unpin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
+bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
+bool clear_data_link_quality(unsigned int address,link_estimator_table_entry* link_estimator_table);
+void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon,link_estimator_table_entry* link_estimator_table,
+                         unsigned char beacon_sequence);
 void receive_routing_packet(void* message);
-bool pin_neighbor(unsigned int address);
-void insert_neighbor(node neighbor);
-node_coordinates get_parent_coordinates(unsigned int parent);
-void check_if_ack_received(unsigned int recipient,bool ack_received);
+bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
+void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_table);
+node_coordinates get_parent_coordinates(unsigned int parent,link_estimator_table_entry* link_estimator_table);
+void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);

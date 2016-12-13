@@ -30,43 +30,31 @@
 //TODO node_running
 
 /*
- * ROUTING FRAME
- *
- * Pointer to the data frame of the next data packet to be sent
- */
-
-ctp_routing_frame* routing_frame;
-
-/*
  * ROUTING PACKET (BEACON)
  *
  * Next routing packet to be sent: it contains the routing information of the node, namely the expected number of hops
  * necessary for him to deliver a message to the root of the collection tree
  */
 
-ctp_routing_packet routing_packet;
+//ctp_routing_packet routing_packet;
 
-route_info route; // The route from the current node to the root
-unsigned char self; // ID of the current node
-bool is_root; // Boolean variable which is set if the current node is the root of the collection tree
+//route_info route; // The route from the current node to the root
+//unsigned char self; // ID of the current node
+//bool is_root; // Boolean variable which is set if the current node is the root of the collection tree
 
 /* VIRTUAL TIME */
 
-extern simtime_t timestamp;
-
-/* DATA PACKETS DELIVERED */
-
-extern unsigned int delivered_packets;
+//extern simtime_t timestamp;
 
 /*
  * BEACONS INTERVAL/SENDING TIME
  */
 
 /*
- * The current value of I_b; at first set it to its minimum possible value
+ * The current value of I_b
  */
 
-unsigned long current_interval=MIN_BEACONS_SEND_INTERVAL;
+//unsigned long current_interval;
 
 /*
  * Instant of time when the next beacon will be sent; it is chosen within the interval [I_b/2 , I_b]
@@ -96,6 +84,12 @@ unsigned char neighbors; // Number of active entries in the routing table
  */
 
 void start_routing_engine(unsigned int ID){
+
+        /*
+         * At first set the beacon sending interval to the minimum possible value
+         */
+
+
 
         /*
          * Store the ID of this node
