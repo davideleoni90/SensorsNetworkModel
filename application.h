@@ -1,6 +1,10 @@
+#ifndef SENSORSNETWORKMODELPROJECT_APPLICATION_H
+#define SENSORSNETWORKMODELPROJECT_APPLICATION_H
+
+#include "link_estimator.h"
+#include "routing_engine.h"
+#include "forwarding_engine.h"
 #include <ROOT-Sim.h>
-//#include "link_estimator.h"
-//#include "routing_engine.h"
 
 /* DISTRIBUZIONI TIMESTAMP */
 #define UNIFORM		0
@@ -41,33 +45,10 @@ enum{
 };
 
 /*
- * NODE COORDINATES
- *
- * Each node (logic process) has some spatia coordinates, represented by this structure
- */
-
-typedef struct{
-        int x;
-        int y;
-}node_coordinates;
-
-/*
- * NODE
- *
- * Each logic process of the simulation corresponds to a node and is uniquely identified by its ID and its coordinates,
- * which are randomly assigned by the simulator with the INIT event
- */
-
-typedef struct{
-        unsigned int ID;
-        node_coordinates coordinates;
-}node;
-
-/*
  * PHYSICAL & DATA LINK OVERHEAD
  */
 
-typedef struct{
+typedef struct _physical_datalink_overhead{
         node src;
         node dst;
 }physical_datalink_overhead;
@@ -76,7 +57,7 @@ typedef struct{
  * CTP LINK ESTIMATOR FRAME
  */
 
-typedef struct{
+typedef struct _ctp_link_estimator_frame{
         unsigned char seq;
 }ctp_link_estimator_frame;
 
@@ -84,7 +65,7 @@ typedef struct{
  * CTP ROUTING FRAME
  */
 
-typedef struct{
+typedef struct _ctp_routing_frame{
         unsigned char options;
         unsigned int parent;
         unsigned char ETX;
@@ -94,7 +75,7 @@ typedef struct{
  * CTP ROUTING PACKET
  */
 
-typedef struct{
+typedef struct _ctp_routing_packet{
         physical_datalink_overhead phy_mac_overhead;
         ctp_link_estimator_frame link_estimator_frame;
         ctp_routing_frame routing_frame;
@@ -104,7 +85,7 @@ typedef struct{
  * CTP DATA FRAME
  */
 
-typedef struct{
+typedef struct _ctp_data_packet_frame{
         unsigned char options;
         unsigned char THL;
         unsigned short ETX;
@@ -116,7 +97,7 @@ typedef struct{
  * CTP DATA PACKET
  */
 
-typedef struct{
+typedef struct _ctp_data_packet{
         physical_datalink_overhead phy_mac_overhead;
         ctp_data_packet_frame data_packet_frame;
         int payload;
@@ -128,11 +109,18 @@ typedef struct{
  * Structure describing the current path chosen by a node to send data packets
  */
 
-typedef struct{
+typedef struct _route_info{
         unsigned int parent; // ID of the parent node
         unsigned short etx; // ETX of the parent node + 1-hop ETX of the link to the parent node
         //bool congested;
 }route_info;
+
+typedef struct _routing_table_entry{
+        unsigned int neighbor;
+        route_info info;
+
+
+}routing_table_entry;
 
 /*
  * NODE STATE
@@ -214,5 +202,7 @@ typedef struct _node_state{
         simtime_t lvt; // Value of the Local Virtual Time
 } node_state;
 
-void wait_time(simtime_t interval,unsigned int type);
+void wait_time(unsigned int me,simtime_t timestamp,unsigned int type);
 void collected_data_packet(ctp_data_packet* packet);
+
+#endif

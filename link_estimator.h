@@ -1,8 +1,37 @@
+#ifndef SENSORSNETWORKMODELPROJECT_LINK_ESTIMATOR_H
+#define SENSORSNETWORKMODELPROJECT_LINK_ESTIMATOR_H
+
 #include <stdbool.h>
+
+typedef struct _ctp_routing_packet ctp_routing_packet;
+
+/*
+ * NODE COORDINATES
+ *
+ * Each node (logic process) has some spatia coordinates, represented by this structure
+ */
+
+typedef struct _node_coordinates{
+        int x;
+        int y;
+}node_coordinates;
+
+/*
+ * NODE
+ *
+ * Each logic process of the simulation corresponds to a node and is uniquely identified by its ID and its coordinates,
+ * which are randomly assigned by the simulator with the INIT event
+ */
+
+typedef struct _node{
+        unsigned int ID;
+        node_coordinates coordinates;
+}node;
+
 //#include "application.h"
 
 /*
- * CONSTANTS RELATED TO FORWARDING
+ * CONSTANTS RELATED TO THE LINK ESTIMATOR
  */
 
 enum{
@@ -47,40 +76,6 @@ enum{
 };
 
 /*
- * Flags for the neighbor table entry
- */
-
-enum {
-
-        /*
-         * The entry corresponding to a neighbor becomes invalid if no beacon is received from him within a certain
-         * timeout
-         */
-
-                VALID_ENTRY = 0x1,
-
-        /*
-         * A link becomes mature after BLQ_PKT_WINDOW packets are received and an estimate is computed
-         */
-
-                MATURE_ENTRY = 0x2,
-
-        /*
-         * Flag to indicate that this link has received the first sequence number
-         */
-
-                INIT_ENTRY = 0x4,
-
-        /*
-         * Flag indicates that the 1-hop ETX of the neighbor is 0, thus it's the root of the tree; also it indicates
-         * that the node is selected as the current parent node
-         */
-
-                PINNED_ENTRY = 0x8
-};
-
-
-/*
  * Structure that describes an entry in the link estimator table (or neighbor table): it reports the features of a link
  * to a neighbor node
  */
@@ -121,6 +116,39 @@ typedef struct _link_estimator_table_entry{
         unsigned char data_sent;
 }link_estimator_table_entry;
 
+/*
+ * Flags for the neighbor table entry
+ */
+
+enum {
+
+        /*
+         * The entry corresponding to a neighbor becomes invalid if no beacon is received from him within a certain
+         * timeout
+         */
+
+                VALID_ENTRY = 0x1,
+
+        /*
+         * A link becomes mature after BLQ_PKT_WINDOW packets are received and an estimate is computed
+         */
+
+                MATURE_ENTRY = 0x2,
+
+        /*
+         * Flag to indicate that this link has received the first sequence number
+         */
+
+                INIT_ENTRY = 0x4,
+
+        /*
+         * Flag indicates that the 1-hop ETX of the neighbor is 0, thus it's the root of the tree; also it indicates
+         * that the node is selected as the current parent node
+         */
+
+                PINNED_ENTRY = 0x8
+};
+
 /* LINK ESTIMATOR API */
 
 unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* link_estimator_table);
@@ -134,3 +162,5 @@ bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimato
 void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_table);
 node_coordinates get_parent_coordinates(unsigned int parent,link_estimator_table_entry* link_estimator_table);
 void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
+
+#endif

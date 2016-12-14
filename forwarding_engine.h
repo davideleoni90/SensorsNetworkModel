@@ -1,5 +1,10 @@
+#ifndef SENSORSNETWORKMODELPROJECT_FORWARDING_ENGINE_H
+#define SENSORSNETWORKMODELPROJECT_FORWARDING_ENGINE_H
+
 #include <stdbool.h>
-#include "application.h"
+//#include "application.h"
+typedef struct _ctp_data_packet ctp_data_packet;
+
 
 /*
  * CONSTANTS RELATED TO FORWARDING
@@ -68,3 +73,5 @@ bool create_data_packet();
 void receive_ack(bool is_packet_acknowledged);
 bool send_data_packet();
 bool forward_data_packet(ctp_data_packet* packet);
+
+#endif

@@ -23,8 +23,6 @@
 
 #include <stddef.h>
 #include <ROOT-Sim.h>
-#include "routing_engine.h"
-#include "link_estimator.h"
 #include "application.h"
 
 //TODO node_running
@@ -80,57 +78,41 @@ unsigned char neighbors; // Number of active entries in the routing table
  * 1-a periodic timer, with period UPDATE_ROUTE_TIMER; when it is fired, the route of the node is recomputed
  * 2-a periodic timer, with decreasing period; when it is fired, a new beacon is broadcasted
  *
- * @self: ID of this node (logical process)
+ * @state: pointer to the object representing the current state of the node
  */
 
-void start_routing_engine(unsigned int ID){
+void start_routing_engine(node_state* state){
 
         /*
          * At first set the beacon sending interval to the minimum possible value
          */
 
-
-
-        /*
-         * Store the ID of this node
-         */
-
-        self=ID;
+        state->current_interval=MIN_BEACONS_SEND_INTERVAL;
 
         /*
          * Set the number of valid entries in the ROUTING TABLE to 0
          */
 
-        neighbors=0;
-
-        /*
-         * Check if the current node is designed to be the root of the collection tree in this simulation; set the
-         * flag "is_root" as consequence
-         */
-
-        if(self==CTP_ROOT)
-                is_root=true;
-        else
-                is_root=false;
+        state->neighbors=0;
 
         /*
          * Initialize the route from this node to the root of the collection tree
          */
 
-        init_route_info(&route);
+        init_route_info(&state->route);
 
         /*
          * Initialize the pointer to the next beacon to be sent
          */
 
-        routing_frame=&routing_packet;
+        //routing_frame=&routing_packet;
 
         /*
          * Start the periodic timer with interval UPDATE_ROUTE_TIMER: every time is fired, the route is updated.
          * The simulator is in charge of re-setting the timer every time it is fired
          */
 
-        wait_time(UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
+        wait_time(state->me.ID,state->lvt+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
 
         /*
          * Start the periodic timer for sending beacons: the interval is BEACON_MIN_INTERVAL at first, and is increased
@@ -402,10 +384,13 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
  *
  * On the basis of the beacons sent by neighbors (received by the link estimator and passed to the routing engine), the
  * route from the current node to root of the tree is (re)computed, i.e. a parent is chosen among the neighbors. Such
- * an update of the route may also be induced by the fact that a neighbor does not acknowledge data packets.
+ * an update of the route may also be induced by the fact that a neighbor does not acknowledge data packets. Besides,
+ * the ROUTING ENGINE periodically updates the route, when the route timer is fired
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-void update_route(){
+void update_route(node_state* state){
 
         /*
          * Index used to scan the routing table

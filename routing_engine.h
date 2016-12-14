@@ -1,5 +1,13 @@
+#ifndef SENSORSNETWORKMODELPROJECT_ROUTING_ENGINE_H
+#define SENSORSNETWORKMODELPROJECT_ROUTING_ENGINE_H
+
 #include <stdbool.h>
 #include "application.h"
+
+typedef struct _node node;
+typedef struct _ctp_routing_frame ctp_routing_frame;
+typedef struct _node_state node_state;
+//#include "application.h"
 
 /*
  * CONSTANTS RELATED TO ROUTING
@@ -27,20 +35,15 @@ enum{
         MAX_BEACONS_SEND_INTERVAL=512000 // Maximum value (min frequency) for the interval between two beacons sent
 };
 
-typedef struct{
-        unsigned int neighbor;
-        route_info info;
-
-
-}routing_table_entry;
-
 /* ROUTING ENGINE API */
 
 void neighbor_evicted(unsigned int address);
 bool get_etx(unsigned short* etx);
 node get_parent();
-void update_route();
+void update_route(node_state* state);
 void receive_beacon(ctp_routing_frame* routing_frame, node from);
 void send_beacon();
 void schedule_beacons_interval_update();
 void double_beacons_send_interval();
+
+#endif
