@@ -38,10 +38,30 @@ enum{
         BROADCAST_ADDRESS=0xffff, // A packet with such an address is sent to all the neighbor nodes
 
         /*
+         * Time for a message to be delivered to its recipient
+         */
+
+        MESSAGE_DELIVERY_TIME=4,
+
+        /*
          * Lower bound of data packets received by the root for the simulation to stop
          */
 
-        COLLECTED_DATA_PACKETS_GOAL=10
+        COLLECTED_DATA_PACKETS_GOAL=10,
+
+        /*
+         * Maximum euclidean distance between two nodes for them to be considered neighbors
+         */
+
+        NEIGHBORS_MAX_DISTANCE=4,
+
+        /*
+         * If the euclidean distance between two neighbor nodes is less than this constants, every message sent by
+         * either of the nodes is certainly received by the other node; if the distance is it equal or greater than,
+         * message may or may not be received
+         */
+
+        NEIGHBORS_SAFE_DISTANCE=2
 };
 
 /*
@@ -179,7 +199,7 @@ typedef struct _node_state{
         unsigned long current_interval;
 
         /*
-         * Instant of time when the next beacon will be sent; it is chosen within the interval [I_b/2 , I_b]
+         * Time to wait before sending another beacon; it is chosen within the interval [I_b/2 , I_b]
          */
 
         unsigned long beacon_sending_time;
@@ -202,7 +222,8 @@ typedef struct _node_state{
         simtime_t lvt; // Value of the Local Virtual Time
 } node_state;
 
-void wait_time(unsigned int me,simtime_t timestamp,unsigned int type);
+void wait_until(unsigned int me,simtime_t timestamp,unsigned int type);
 void collected_data_packet(ctp_data_packet* packet);
+void broadcast_event(ctp_routing_packet* beacon,simtime_t time);
 
 #endif

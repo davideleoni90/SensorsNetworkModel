@@ -37,13 +37,13 @@ enum{
 
 /* ROUTING ENGINE API */
 
-void neighbor_evicted(unsigned int address);
+void neighbor_evicted(unsigned int address,node_state* state);
 bool get_etx(unsigned short* etx);
 node get_parent();
 void update_route(node_state* state);
-void receive_beacon(ctp_routing_frame* routing_frame, node from);
-void send_beacon();
-void schedule_beacons_interval_update();
-void double_beacons_send_interval();
+void receive_beacon(ctp_routing_frame* routing_frame, node from,node_state*state);
+void send_beacon(node_state* state);
+void schedule_beacons_interval_update(node_state* state);
+void double_beacons_send_interval(node_state* state);
 
 #endif

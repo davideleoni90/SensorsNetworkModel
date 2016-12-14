@@ -58,7 +58,7 @@
  * Instant of time when the next beacon will be sent; it is chosen within the interval [I_b/2 , I_b]
  */
 
-unsigned long beacon_sending_time;
+//unsigned long beacon_sending_time;
 
 /*
  * ROUTING TABLE
@@ -67,8 +67,14 @@ unsigned long beacon_sending_time;
  * => the routing engine maintains for each the value of ETX and selects the one with the lowest value as parent
  */
 
-routing_table_entry routing_table[ROUTING_TABLE_SIZE];
-unsigned char neighbors; // Number of active entries in the routing table
+//routing_table_entry routing_table[ROUTING_TABLE_SIZE];
+//unsigned char neighbors; // Number of active entries in the routing table
+
+/*
+         * Initialize the pointer to the next beacon to be sent
+         */
+
+//routing_frame=&routing_packet;
 
 /*
  * START ROUTING ENGINE
@@ -102,24 +108,18 @@ void start_routing_engine(node_state* state){
         init_route_info(&state->route);
 
         /*
-         * Initialize the pointer to the next beacon to be sent
-         */
-
-        //routing_frame=&routing_packet;
-
-        /*
          * Start the periodic timer with interval UPDATE_ROUTE_TIMER: every time is fired, the route is updated.
          * The simulator is in charge of re-setting the timer every time it is fired
          */
 
-        wait_time(state->me.ID,state->lvt+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
+        wait_until(state->me.ID,state->lvt+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
 
         /*
          * Start the periodic timer for sending beacons: the interval is BEACON_MIN_INTERVAL at first, and is increased
          * progressively
          */
 
-        reset_beacon_interval();
+        reset_beacon_interval(state);
 }
 
 /*
@@ -287,9 +287,10 @@ void update_neighbor_congested(unsigned int address,bool congested){
  * @from: ID of the node that sent the beacon
  * @parent: the ID of the actual parent of the node that sent the beacon
  * @etx: the ETX of the actual route of the node that sent the beacon
+ * @state: pointer to the object representing the current state of the node
  */
 
-void update_routing_table(unsigned int from, unsigned int parent, unsigned short etx){
+void update_routing_table(unsigned int from, unsigned int parent, unsigned short etx,node_state* state){
 
         /*
          * Index of the entry in the table to be updated
@@ -304,10 +305,22 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
         unsigned short one_hop_etx;
 
         /*
+         * Pointer to the routing table of the current node
+         */
+
+        routing_table_entry* routing_table;
+
+        /*
+         * Get the routing table of the current node
+         */
+
+        routing_table=state->routing_table;
+
+        /*
          * Get 1-hop ETX of the link to the neighbor associated to the entry of the table
          */
 
-        one_hop_etx=get_one_hop_etx(from);
+        one_hop_etx=get_one_hop_etx(from,state->link_estimator_table);
 
         /*
          * Check whether an entry in the routing table exists for the node that sent the beacon
@@ -324,7 +337,7 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
                 //TODO remove an entry???
                 return;
         }
-        else if(index==neighbors){
+        else if(index==state->neighbors){
 
                 /*
                  * No entry matches the ID of the sender, but the table is not full => we create a new entry for the
@@ -363,7 +376,7 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
                          * Update the counter of neighbors "tracked" in the neighbor table
                          */
 
-                        ++neighbors;
+                        state->neighbors+=1;
                 }
         }
         else{
@@ -397,6 +410,12 @@ void update_route(node_state* state){
          */
 
         unsigned char i;
+
+        /*
+         * Route of the current node
+         */
+
+        route_info route;
 
         /*
          * Pointer to the current entry of the routing table, used during a scan
@@ -438,7 +457,7 @@ void update_route(node_state* state){
          * If the current node is the root of the tree, there's no parent to select, so just return false
          */
 
-        if(is_root)
+        if(state->me.ID==CTP_ROOT)
                 return;
 
         /*
@@ -454,6 +473,12 @@ void update_route(node_state* state){
 
         min_etx=INFINITE_ETX;
         current_etx=INFINITE_ETX;
+
+        /*
+         * Get the route of the node from its state object
+         */
+
+        route=state->route;
 
         /*
          * Scan the entries of the routing table in order to select the new parent of the node
@@ -472,7 +497,7 @@ void update_route(node_state* state){
                  * current node (in order to avoid loops)
                  */
 
-                if((current_entry->info.parent==INVALID_ADDRESS) || (current_entry->info.parent==self))
+                if((current_entry->info.parent==INVALID_ADDRESS) || (current_entry->info.parent==state->me.ID))
                         continue;
 
                 /*
@@ -480,7 +505,7 @@ void update_route(node_state* state){
                  * Contact the link estimator asking for the 1-hop ETX of the neighbor currently analyzed
                  */
 
-                current_one_hop_etx=get_one_hop_etx(current_entry->neighbor);
+                current_one_hop_etx=get_one_hop_etx(state->me.ID,current_entry->neighbor);
 
                 /*
                  * Compute the ETX of the route through the current entry of the routing table: it's the sum of the
@@ -575,23 +600,29 @@ void update_route(node_state* state){
                    (min_etx+PARENT_SWITCH_THRESHOLD<current_etx)){
 
                         /*
+                         * Pointer to the link estimator table of the node
+                         */
+
+                        link_estimator_table_entry* estimator_table=state->link_estimator_table;
+
+                        /*
                          * It's time to change parent => the corresponding entry in the estimator table has to be
                          * unpinned before removal
                          */
 
-                        unpin_neighbor(route.parent);
+                        unpin_neighbor(route.parent,estimator_table);
 
                         /*
                          * Now pin the entry corresponding to the new parent
                          */
 
-                        pin_neighbor(best_entry->neighbor);
+                        pin_neighbor(best_entry->neighbor,estimator_table);
 
                         /*
                          * Clear data link quality information of the new parent in the estimator table
                          */
 
-                        clear_data_link_quality(best_entry->neighbor);
+                        clear_data_link_quality(best_entry->neighbor,estimator_table);
 
                         /*
                          * Update the "route" variable with data of the new parent
@@ -621,15 +652,23 @@ void update_route(node_state* state){
  * After the interval of the timer for the beacons I_b has been set, randomly choose a sending time for the next beacon
  * in the interval [I_b/2 , I_b] and schedules a new event of type SEND_BEACON_TIMER_FIRED at the new sending time:
  * when the virtual time of the node will reach this value, a new beacon will be sent.
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-void set_beacon_sending_time(){
+void set_beacon_sending_time(node_state* state){
+
+        /*
+         * Time to wait before sending another beacon; it is chosen within the interval [I_b/2 , I_b]
+         */
+
+        unsigned long beacon_sending_time;
 
         /*
          * Get the upper bound for the beacon sending time
          */
 
-        beacon_sending_time=current_interval;
+        beacon_sending_time=state->current_interval;
 
         /*
          * Then get the lower bound for the beacon sending time
@@ -645,10 +684,16 @@ void set_beacon_sending_time(){
         beacon_sending_time+= ((unsigned long)Random())%beacon_sending_time;
 
         /*
+         * Store the new sending time in the state object
+         */
+
+        state->beacon_sending_time=beacon_sending_time;
+
+        /*
          * Schedule the sending of the next beacon at the chosen sending time
          */
 
-        wait_time(timestamp+beacon_sending_time,SEND_BEACONS_TIMER_FIRED);
+        wait_until(state->me.ID,state->lvt+beacon_sending_time,SEND_BEACONS_TIMER_FIRED);
 }
 
 
@@ -657,21 +702,23 @@ void set_beacon_sending_time(){
  * RESET BEACON INTERVAL
  *
  * Set the value of I_b back to its minimum possible value and randomly choose a new sending time for next beacon
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-void reset_beacon_interval(){
+void reset_beacon_interval(node_state* state){
 
         /*
          * Restore minimum value the beacon interval (I_b)
          */
 
-        current_interval=MIN_BEACONS_SEND_INTERVAL;
+        state->current_interval=MIN_BEACONS_SEND_INTERVAL;
 
         /*
          * Choose a sending time randomly
          */
 
-        set_beacon_sending_time();
+        set_beacon_sending_time(state);
 }
 
 /*
@@ -680,65 +727,83 @@ void reset_beacon_interval(){
  * After a time equivalent to I_b has passed (since I_b itself had been set), its value is doubled, so that beacons are
  * sent with decreasing frequency => this function calculates the moment when the update will have to take place and
  * advances in the virtual time until the moment
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-void schedule_beacons_interval_update(){
+void schedule_beacons_interval_update(node_state* state){
 
         /*
          * Calculate time left before the beacons interval has to be updated
          */
 
-        unsigned long remaining=current_interval-beacon_sending_time;
+        unsigned long remaining=state->current_interval-state->beacon_sending_time;
 
         /*
          * Request an event scheduled at the time in the future when the update will have to be performed
          */
 
-        wait_time(timestamp+remaining,SET_BEACONS_TIMER);
+        wait_until(state->me.ID,state->lvt+remaining,SET_BEACONS_TIMER);
 }
 
 /*
  * DOUBLE THE BEACONS INTERVAL
  *
  * Double the interval of the timer for beacons and start this
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-void double_beacons_send_interval(){
+void double_beacons_send_interval(node_state* state){
 
         /*
          * Double the interval
          */
 
-        current_interval*=2;
+        state->current_interval*=2;
 
         /*
          * If the interval is beyond the maximum value allowed (too low frequency of beacons sending), set it to the
          * maximum itself => there's an upper bound for the interval between two successive beacons sent
          */
 
-        if(current_interval>MAX_BEACONS_SEND_INTERVAL)
-                current_interval=MAX_BEACONS_SEND_INTERVAL;
+        if(state->current_interval>MAX_BEACONS_SEND_INTERVAL)
+                state->current_interval=MAX_BEACONS_SEND_INTERVAL;
 
         /*
          * Start the timer again
          */
 
-        set_beacon_sending_time();
+        set_beacon_sending_time(state);
 }
 
 /*
  * SEND BEACON
  *
  * Send a new beacon containing information about the route of the node
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-void send_beacon(){
+void send_beacon(node_state* state){
+
+        /*
+         * Pointer to the next beacon of the node to be sent
+         */
+
+        ctp_routing_packet* routing_packet=&state->routing_packet;
+
+        /*
+         * Pointer to the structure representing the current route of the node
+         */
+
+        route_info* route=&state->route;
 
         /*
          * Get the pointer to the routing info within the beacon
          */
 
-        routing_frame=&routing_packet.routing_frame;
+        ctp_routing_frame* routing_frame=&routing_packet->routing_frame;
 
         /*
          * Default value for the options flag is 0
@@ -758,16 +823,16 @@ void send_beacon(){
          * Set the current parent in the corresponding field of the routing frame
          */
 
-        routing_frame->parent=route.parent;
+        routing_frame->parent=route->parent;
 
         /*
          * Check whether the node is the root of the tree: if so, only set the ETX field in the routing frame (it should
          * be 0)
          */
 
-        if(is_root)
-                routing_frame->ETX=route.etx;
-        else if(route.parent==INVALID_ADDRESS){
+        if(state->root)
+                routing_frame->ETX=route->etx;
+        else if(route->parent==INVALID_ADDRESS){
 
                 /*
                  * If the current route of the node does not have a valid parent, it asks the other neighbors to send
@@ -775,7 +840,7 @@ void send_beacon(){
                  * the etx is transmitted
                  */
 
-                routing_frame->ETX=route.etx;
+                routing_frame->ETX=route->etx;
                 routing_frame->options |= CTP_PULL;
         }
         else{
@@ -785,7 +850,7 @@ void send_beacon(){
                  * plus the 1-hop ETX to the parent
                  */
 
-                routing_frame->ETX=route.etx+get_one_hop_etx(route.parent);
+                routing_frame->ETX=route->+get_one_hop_etx(route->parent,state->link_estimator_table);
         }
 
         /*
@@ -793,7 +858,14 @@ void send_beacon(){
          * estimator for this service
          */
 
-        send_routing_packet(BROADCAST_ADDRESS,&routing_packet);
+        send_routing_packet(routing_packet,state->link_estimator_table,state->beacon_sequence_number, state->me,
+                state->lvt);
+
+        /*
+         * Update the beacon sequence number
+         */
+
+        state->beacon_sequence_number+=1;
 }
 
 /*
@@ -804,15 +876,28 @@ void send_beacon(){
  *
  * @routing_frame: the routing frame extracted from the beacon
  * @from: ID and coordinates of the node that sent the message
+ * @state: pointer to the object representing the current state of the node
  */
 
-void receive_beacon(ctp_routing_frame* routing_frame, node from){
+void receive_beacon(ctp_routing_frame* routing_frame, node from,node_state*state){
 
         /*
          * Flag indicating that the sender is congested
          */
 
         bool congested=routing_frame->options & CTP_CONGESTED;
+
+        /*
+         * Pointer to the link estimator table of the node
+         */
+
+        link_estimator_table_entry* neighbors_table;
+
+        /*
+         * Get the pointer to the neighbors table
+         */
+
+        neighbors_table=state->link_estimator_table;
 
         /*
          * Now update the ROUTING TABLE using the info contained in the routing layer frame
@@ -829,15 +914,15 @@ void receive_beacon(ctp_routing_frame* routing_frame, node from){
                  */
 
                 if(!routing_frame->ETX){
-                        insert_neighbor(from);
-                        pin_neighbor(from.ID);
+                        insert_neighbor(from,neighbors_table);
+                        pin_neighbor(from.ID,neighbors_table);
                 }
 
                 /*
                  * Update the ROUTING TABLE using info contained in the beacon
                  */
 
-                update_routing_table(from.ID,routing_frame->parent,routing_frame->ETX);
+                update_routing_table(from.ID,routing_frame->parent,routing_frame->ETX,state);
 
                 /*
                  * Update the "congested" flag to the value reported in the beacon.
@@ -855,7 +940,7 @@ void receive_beacon(ctp_routing_frame* routing_frame, node from){
          */
 
         if(routing_frame->options & CTP_PULL)
-                reset_beacon_interval();
+                reset_beacon_interval(state);
 }
 
 /*
@@ -866,9 +951,10 @@ void receive_beacon(ctp_routing_frame* routing_frame, node from){
  * the neighbor was the parent of this node
  *
  * @address: ID of the ex-neighbor
+ * @state: pointer to the object representing the current state of the node
  */
 
-void neighbor_evicted(unsigned int address){
+void neighbor_evicted(unsigned int address,node_state* state){
 
         /*
          * Evict the given neighbor from the routing table
@@ -880,9 +966,9 @@ void neighbor_evicted(unsigned int address){
          * Check if the evicted neighbor is the actual parent: if so, reset the route and ask for a route update
          */
 
-        if(address==route.parent){
-                init_route_info(&route);
-                update_route();
+        if(address==state->route.parent){
+                init_route_info(&state->route);
+                update_route(state);
         }
 }
 

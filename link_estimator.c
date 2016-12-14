@@ -764,14 +764,15 @@ bool clear_data_link_quality(unsigned int address,link_estimator_table_entry* li
  * Set the fields of the link estimator frame and combine this with the given routing frame => the resulting beacon is
  * sent to the other nodes by scheduling a new simulator event.
  *
- * @dst: th ID of the recipient node or BROADCAST_ADDRESS in case of broadcast messages
  * @routing_frame: pointer to the routing frame, initialized by the routing engine, of the routing packet to send
  * @link_estimator_table: pointer to the link estimator table of the node
  * @beacon_sequence: sequence number of the last beacon sent
+ * @me: ID and coordinates of the sender
+ * @now: current value of local virtual time
  */
 
-void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon,link_estimator_table_entry* link_estimator_table,
-                         unsigned char beacon_sequence){
+void send_routing_packet(ctp_routing_packet* beacon,link_estimator_table_entry* link_estimator_table,
+                         unsigned char beacon_sequence,node me,simtime_t now){
 
         /*
          * Pointer to the physical and data link frame of the beacon that is being sent
@@ -784,30 +785,6 @@ void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon,link_estima
          */
 
         ctp_link_estimator_frame* link_estimator_frame;
-
-        /*
-         * Index of the entry in the estimator table corresponding to the recipient of the packet
-         */
-
-        unsigned char index;
-
-        /*
-         * Get the index of the entry
-         */
-
-        index=find_estimator_entry(dst,link_estimator_table);
-
-        /*
-         * Check that the recipient is know to the link estimator
-         */
-
-        if(index==INVALID_ENTRY)
-
-                /*
-                 * No entry in the neighbor table matches the recipient => no beacon can be sent to him
-                 */
-
-                return;
 
         /*
          * Extract the physical and data link frame from the given beacon
@@ -827,7 +804,7 @@ void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon,link_estima
          * estimator table
          */
 
-        phy_mac_overhead->dst=link_estimator_table[index].neighbor;
+        phy_mac_overhead->dst={BROADCAST_ADDRESS,{0,0}};
 
         /*
          * Extract the link estimator frame from the given beacon
@@ -840,14 +817,14 @@ void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon,link_estima
          * increment the sequence number itself
          */
 
-        link_estimator_frame->seq=beacon_sequence++;
+        link_estimator_frame->seq=beacon_sequence;
 
         /*
          * At this point the beacon is well formed, so it's time to send it to the specified destination => schedule a
          * new brodcast event
          */
 
-        broadcast_event(&beacon,BEACON_RECEIVED);
+        broadcast_event(&beacon,now);
 }
 
 /*
@@ -1225,10 +1202,11 @@ void update_neighbor_entry(unsigned char index, unsigned char seq,link_estimator
  * @physical_link_frame: pointer to the physical layer frame of the beacon received by the node
  * @link_estimator_frame: pointer to the link estimator frame of the beacon received by the node
  * @link_estimator_table: pointer to the link estimator table of the node
+ * @state: pointer to the object representing the current state of the node
  */
 
 void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_link_estimator_frame* link_estimator_frame,
-                             link_estimator_table_entry* link_estimator_table){
+                             node_state* state){
 
         /*
          * Index of the entry int the neighbor table corresponding sender: had no message ever been received from  the
@@ -1242,6 +1220,12 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
          */
 
         node sender;
+
+        /*
+         * Get a pointer to the link estimator table of the current node
+         */
+
+        link_estimator_table_entry* link_estimator_table=state->link_estimator_table;
 
         /*
          * Check if it is a broadcast message or a unicast message
@@ -1335,7 +1319,7 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
                                          * entry in the estimator table with the ID of the node to be added
                                          */
 
-                                        neighbor_evicted(link_estimator_table[index].neighbor.ID);
+                                        neighbor_evicted(link_estimator_table[index].neighbor.ID,state);
                                         init_estimator_entry(sender,index,link_estimator_table);
                                 }
                                 else
@@ -1373,7 +1357,7 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
                                                  * ROUTING TABLE
                                                  */
 
-                                                neighbor_evicted(sender.ID);
+                                                neighbor_evicted(sender.ID,state);
 
                                                 /*
                                                  * Replace the victim entry with the one of the new neighbor
@@ -1399,10 +1383,10 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
  * CTP stack, the ROUTINE ENGINE, to be further processed
  *
  * @message: the payload from the content of the event delivered to the node
- * @link_estimator_table: pointer to the link estimator table of the node
+ * @state: pointer to the object representing the current state of the node
  */
 
-void receive_routing_packet(void* message,link_estimator_table_entry* link_estimator_table){
+void receive_routing_packet(void* message,node_state* state){
 
         /*
          * Parse the buffer received to a routing packet (beacon)
@@ -1411,17 +1395,23 @@ void receive_routing_packet(void* message,link_estimator_table_entry* link_estim
         ctp_routing_packet beacon=*((ctp_routing_packet*)message);
 
         /*
+         * Get a pointer to the link estimator table of the current node
+         */
+
+        link_estimator_table_entry* link_estimator_table=state->link_estimator_table;
+
+        /*
          * Extract the physical and the link estimator frames from the beacon and process it at this level
          * (LINK ESTIMATOR)
          */
 
-        process_received_beacon(&beacon.phy_mac_overhead,&beacon.link_estimator_frame,link_estimator_table);
+        process_received_beacon(&beacon.phy_mac_overhead,&beacon.link_estimator_frame,state);
 
         /*
          * Then extract the routing layer frame and pass it to the ROUTING ENGINE
          */
 
-        receive_beacon(&beacon.routing_frame,beacon.phy_mac_overhead.src);
+        receive_beacon(&beacon.routing_frame,beacon.phy_mac_overhead.src,state);
 }
 
 /*

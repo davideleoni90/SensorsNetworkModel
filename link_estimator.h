@@ -155,9 +155,9 @@ unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* 
 bool unpin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
 bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
 bool clear_data_link_quality(unsigned int address,link_estimator_table_entry* link_estimator_table);
-void send_routing_packet(unsigned int dst,ctp_routing_packet* beacon,link_estimator_table_entry* link_estimator_table,
-                         unsigned char beacon_sequence);
-void receive_routing_packet(void* message);
+void send_routing_packet(ctp_routing_packet* beacon,link_estimator_table_entry* link_estimator_table,
+                         unsigned char beacon_sequence,node me,simtime_t now);
+void receive_routing_packet(void* message,node_state* state);
 bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
 void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_table);
 node_coordinates get_parent_coordinates(unsigned int parent,link_estimator_table_entry* link_estimator_table);

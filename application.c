@@ -3,12 +3,15 @@
 #include <string.h>
 #include <ROOT-Sim.h>
 #include "application.h"
+#include <math.h>
+#include "routing_engine.h"
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
 unsigned char collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
 FILE* file; // Pointer to the file object associated to the configuration file
 void parse_configuration_file(const char* path);
+void start_routing_engine(node_state* state);
 
 /*
  * Pointer to the dynamically allocated array containing the list of the the coordinates of the nodes in the network
@@ -105,9 +108,22 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 exit(EXIT_FAILURE);
                         }
 
+                        /*
+                         * Store ID and coordinates in the state; the latter come from the list of nodes
+                         */
+
+                        state->me={me,nodes_list[me]};
+
                         /* GET PARAMETERS OF THE SIMULATION - end */
 
                         /* SET CTP STACK - start */
+
+                        /*
+                         * If this is the root node, set the corresponding flag in the state object
+                         */
+
+                        if(me==CTP_ROOT)
+                                state->root=true;
 
                         /*
                          * Initialize the LINK ESTIMATOR => set the sequence number of the beacons to 0
@@ -119,6 +135,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * Initialize the ROUTING ENGINE
                          */
 
+                        start_routing_engine(state);
 
 
                         /* SET CTP STACK - start */
@@ -151,7 +168,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * of time, starting from now
                          */
 
-                        //wait_time(UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
+                        wait_until(me,now+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
                         break;
 
                 case SEND_BEACONS_TIMER_FIRED:
@@ -161,13 +178,13 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * update the route, so that information reported in the beacon will not be obsolete
                          */
 
-                        //update_route();
+                        update_route(state);
 
                         /*
                          * Now send the beacon
                          */
 
-                        //send_beacon();
+                        send_beacon(state);
 
                         /*
                          * The interval of the timer that schedules the sending of beacons is continuously changing, in
@@ -175,7 +192,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * timer, i.e. advance in the virtual time until the moment when the timer has to be updated
                          */
 
-                        //schedule_beacons_interval_update();
+                        schedule_beacons_interval_update(state);
                         break;
 
                 case SET_BEACONS_TIMER:
@@ -185,7 +202,11 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * updated
                          */
 
-                        //double_beacons_send_interval();
+                        double_beacons_send_interval(state);
+                        break;
+
+                case BEACON_RECEIVED:
+
                         break;
 
                 default:
@@ -243,7 +264,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
  * @type: ID corresponding to the event => it is necessary for the logical process for deciding what to do next
  */
 
-void wait_time(unsigned int me,simtime_t timestamp,unsigned int type){
+void wait_until(unsigned int me,simtime_t timestamp,unsigned int type){
 
         /*
          * Schedule a new event after "interval" instants of virtual time; no parameters are provide with the event
@@ -253,13 +274,127 @@ void wait_time(unsigned int me,simtime_t timestamp,unsigned int type){
 }
 
 /*
- * DATA PACKET COLLECTED
+ * BROADCAST EVENT
  *
- * This function is called by the root of the collection tree when it receives a data packet => update the counter of the
- * message successfully collected.
+ * Function invoked by the node, in particular, by its LINK ESTIMATOR layer, when it has to send a message to all the
+ * other nodes in the sensors network, i.e. when the node has to send a beacon to its neighbors
  *
- * When the number of packet successfully collected reaches the planned value, the simulation stops
+ * The simulator has to check, for each recipient node, whether it can receive the message, depending on how distant is
+ * the sender.
+ *
+ * In fact it is necessary to simulate the fact that radio of sensor nodes has a limited coverage => a broadcast message
+ * will be received only by those nodes whose distance from the sender is within a certain bound.
+ *
+ * This simulation model adopts the QUASI UNIT DISK GRAPH to model this fact.
+ * Nodes can receive messages from their "neighbor nodes" => two nodes A and B are neighbors if the euclidean distance
+ * between them is less than or equal to "r" (simulation parameter).
+ * If their distance is less than or equal to "p" (simulation parameter), with p in the interval (0,r], messages sent
+ * by A to B and by B to A are certainly delivered.
+ * If their distance is in the range (p,r], messages sent by A to B and by B to A may or may not be delivered; the
+ * closer the two nodes, the more likely that messages are delivered
+ *
+ * @beacon: the message to be broadcasted
+ * @time: virtual time when the message should be delivered
  */
+
+void broadcast_event(ctp_routing_packet* beacon,simtime_t time){
+
+        /*
+         * Index used to iterate through nodes of the network
+         */
+
+        unsigned char i;
+
+        /*
+         * Get the sender node: it's identity is reported in the physical overhead of the given packet
+         */
+
+        node src=beacon->phy_mac_overhead.src;
+
+        /*
+         * For each node (logical process) calculate the euclidean distance from the sender and, depending on this,
+         * decide whether it should receive the message or not.
+         */
+
+        for(i=0;i<n_prc_tot;i++){
+
+                /*
+                 * Euclidean distance between the sender and the recipient of the message
+                 */
+
+                double distance;
+
+                /*
+                 * Coordinates of the current node
+                 */
+
+                node_coordinates recipient;
+
+                /*
+                 * Skip the sender of the message
+                 */
+
+                if(i==src.ID)
+                        continue;
+
+                /*
+                 * Get coordinates of the current node from the dedicated list
+                 */
+
+                recipient=nodes_list[i];
+
+                /*
+                 * Calculate euclidean distance
+                 */
+
+                distance=euclidean_distance(node.coordinates,recipient);
+
+                /*
+                 * Check the distance and decide how to proceed
+                 */
+
+                if(distance>NEIGHBORS_MAX_DISTANCE) {
+
+                        /*
+                         * Nodes are not neighbors => do nothing
+                         */
+
+                }
+                else{
+
+                        /*
+                         * Nodes are neighbors => if the distance is less than NEIGHBORS_SAFE_DISTANCE, deliver the
+                         * message to the recipient
+                         */
+
+                        if(distance<=NEIGHBORS_SAFE_DISTANCE)
+                                ScheduleNewEvent(i,time+MESSAGE_DELIVERY_TIME,BEACON_RECEIVED,beacon,
+                                                 sizeof(ctp_routing_packet));
+                        else{
+
+                                /*
+                                 * Choose a random number in the range [0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE]
+                                 * and add it to the current distance
+                                 */
+
+                                distance+=RandomRange(0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE);
+
+                                /*
+                                 * If the distance is not beyond NEIGHBORS_MAX_DISTANCE deliver the message, otherwise
+                                 * do nothing
+                                 *
+                                 * NOTE: closer neighbors have higher likelihood to receive the message
+                                 */
+
+                                if(distance<NEIGHBORS_MAX_DISTANCE)
+                                        ScheduleNewEvent(i,time+MESSAGE_DELIVERY_TIME,BEACON_RECEIVED,beacon,
+                                                         sizeof(ctp_routing_packet));
+                        }
+
+                }
+        }
+
+}
 
 /* SIMULATION API - end */
 
@@ -307,7 +442,8 @@ void parse_configuration_file(const char* path){
          */
 
         if(!file){
-                printf("[FATAL ERROR] Provided path doesn't correspond to any configuration file or it cannot be accessed\n");
+                printf("[FATAL ERROR] Provided path doesn't correspond to any configuration file or it cannot be "
+                               "accessed\n");
                 exit(EXIT_FAILURE);
         }
 
@@ -440,6 +576,33 @@ void parse_configuration_file(const char* path){
                 free(nodes_list);
                 exit(EXIT_FAILURE);
         }
+}
+
+/*
+ * EUCLIDEAN DISTANCE
+ *
+ * Return the euclidean distance between given nodes
+ */
+
+double euclidean_distance(node_coordinates a,node_coordinates b){
+
+        /*
+         * Difference between x coordinates of the nodes
+         */
+
+        double x_difference=a.x-b.x;
+
+        /*
+         * Difference between y coordinates of the nodes
+         */
+
+        double y_difference=a.y-b.y;
+
+        /*
+         * Return euclidean distance
+         */
+
+        return sqrt(x_difference*x_difference+y_difference*y_difference);
 }
 
 /* SIMULATION FUNCTIONS - end */
