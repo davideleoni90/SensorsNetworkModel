@@ -71,7 +71,7 @@ typedef struct {
 
 bool create_data_packet();
 void receive_ack(bool is_packet_acknowledged);
-bool send_data_packet();
+bool send_data_packet(node_state* state);
 bool forward_data_packet(ctp_data_packet* packet);
 
 #endif

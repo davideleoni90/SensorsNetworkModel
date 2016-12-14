@@ -138,11 +138,13 @@ void init_route_info(route_info * route) {
  * Find the entry in the routing table matching the given ID
  *
  * @address: the ID of the node we are looking for
+ * @routing_table: pointer to the routing table of the node
+ * @neighbors: number of neighbors recognized by the node
  *
  * Returns the index of the entry matching the given ID, or the number of neighbors in the table otherwise
  */
 
-unsigned char find_index_routing_table(unsigned int address){
+unsigned char find_index_routing_table(unsigned int address,routing_table_entry* routing_table, unsigned char neighbors){
 
         /*
          * Return value: the index of the matching entry
@@ -180,9 +182,10 @@ unsigned char find_index_routing_table(unsigned int address){
  * Remove from the ROUTING TABLE the entry corresponding to the given ID
  *
  * @address: ID of the node whose entry has to be removed
+ * @state: pointer to the object representing the current state of the node
  */
 
-void remove_entry_routing_table(unsigned int address){
+void remove_entry_routing_table(unsigned int address,node_state* state){
 
         /*
          * Index of the entry corresponding to the ID of the given neighbor
@@ -191,7 +194,19 @@ void remove_entry_routing_table(unsigned int address){
         unsigned char index;
 
         /*
-         * Variable used to iterare through the entries of the routing table
+         * Pointer to the routing table of the current node
+         */
+
+        routing_table_entry* routing_table=state->routing_table;
+
+        /*
+         * Neighbors of the node
+         */
+
+        unsigned char neighbors=state->neighbors;
+
+        /*
+         * Variable used to iterate through the entries of the routing table
          */
 
         unsigned char i;
@@ -200,7 +215,7 @@ void remove_entry_routing_table(unsigned int address){
          * Find the index
          */
 
-        index=find_index_routing_table(address);
+        index=find_index_routing_table(address,routing_table,neighbors);
 
         /*
          * Check if an entry for the given neighbor exists: if not, return
@@ -222,7 +237,7 @@ void remove_entry_routing_table(unsigned int address){
          * updated
          */
 
-        --neighbors;
+        state->neighbors-=1;
 
         /*
          * Update the index of all the entries of the table after the one just removed
@@ -326,7 +341,7 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
          * Check whether an entry in the routing table exists for the node that sent the beacon
          */
 
-        index=find_index_routing_table(from);
+        index=find_index_routing_table(from,routing_table,state->neighbors);
 
         /*
          * If the index is equal to the size of the routing table, it means that no entry matches the ID of the sender
@@ -960,7 +975,7 @@ void neighbor_evicted(unsigned int address,node_state* state){
          * Evict the given neighbor from the routing table
          */
 
-        remove_entry_routing_table(address);
+        remove_entry_routing_table(address,state);
 
         /*
          * Check if the evicted neighbor is the actual parent: if so, reset the route and ask for a route update
@@ -1075,17 +1090,18 @@ bool is_neighbor_worth_inserting(ctp_routing_frame* routing_frame){
  *
  * @etx: pointer to the variable declared by the forwarding engine that has to be initialized to the value ETX of the
  * current route
+ * @state: pointer to the object representing the current state of the node
  *
  * Returns true if the node has a valid parent, false if not or if the provided pointer is NULL
  */
 
-bool get_etx(unsigned short* etx){
+bool get_etx(unsigned short* etx,node_state* state){
 
         /*
          * Return false if the given pointer is not valid or if the node hasn't a valid parent
          */
 
-        if(!etx || route.parent==INVALID_ADDRESS)
+        if(!etx || state->route.parent==INVALID_ADDRESS)
                 return false;
 
         /*
@@ -1093,7 +1109,7 @@ bool get_etx(unsigned short* etx){
          * Check if it's the root node
          */
 
-        if(is_root)
+        if(state->root)
 
                 /*
                  * This node is the root of the collection tree => its ETX is 0 by definition
@@ -1107,7 +1123,7 @@ bool get_etx(unsigned short* etx){
                  * itself
                  */
 
-                *etx=route.etx+get_one_hop_etx(route.parent);
+                *etx=state->route.etx+get_one_hop_etx(state->route.parent,state->link_estimator_table);
 
         /*
          * The ETX has been successfully provided => return true
@@ -1122,9 +1138,11 @@ bool get_etx(unsigned short* etx){
  * Function invoked by the forwarding engine to get the ID and coordinates of the parent in the current route.
  * The routing engine can only provide the ID of the parent, but as regards with the coordinates of the parent, on its
  * turn it asks the link estimator
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-node get_parent(){
+node get_parent(node_state* state){
 
         /*
          * The "node" object returned
@@ -1136,13 +1154,13 @@ node get_parent(){
          * Get the parent ID
          */
 
-        parent.ID=route.parent;
+        parent.ID=state->route.parent;
 
         /*
          * Ask the link estimator for coordinates of the parent
          */
 
-        parent.coordinates=get_parent_coordinates(parent.ID);
+        parent.coordinates=get_parent_coordinates(parent.ID,state->link_estimator_table);
 
         /*
          * Return the parent

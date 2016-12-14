@@ -632,9 +632,11 @@ void init_forwarding_engine(unsigned int ID){
  * Returns true if the function has to be invoked again. This happens when the head of the queue is a duplicate: in fact
  * it is removed from the queue, so a further call to the queue can be made to forward the next packet (unless it is a
  * duplicate on its turn).
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-bool send_data_packet() {
+bool send_data_packet(node_state* state) {
 
         /*
          * Value of the ETX of the current route
@@ -674,7 +676,7 @@ bool send_data_packet() {
          * the node
          */
 
-        if ((!get_etx(&etx))) {
+        if ((!get_etx(&etx,state->route,state->root))) {
 
                 /*
                  * The function "get_etx" returns false if the parent of the node is not valid => if this is the case,

@@ -207,6 +207,13 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case BEACON_RECEIVED:
 
+                        /*
+                         * A beacon has been received => possibly update the neighbor and the routing table; the
+                         * LINK ESTIMATOR first processes the beacon and then "forwards" it to the above ROUTING LAYER
+                         */
+
+                        receive_routing_packet(event_content,state);
+
                         break;
 
                 default:

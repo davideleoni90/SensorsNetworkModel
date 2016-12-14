@@ -38,8 +38,8 @@ enum{
 /* ROUTING ENGINE API */
 
 void neighbor_evicted(unsigned int address,node_state* state);
-bool get_etx(unsigned short* etx);
-node get_parent();
+bool get_etx(unsigned short* etx,node_state* state);
+node get_parent(node_state* state);
 void update_route(node_state* state);
 void receive_beacon(ctp_routing_frame* routing_frame, node from,node_state*state);
 void send_beacon(node_state* state);
