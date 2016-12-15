@@ -19,12 +19,13 @@
 
 enum{
         SEND_BEACONS_TIMER_FIRED=1, // The timer for beacons has been fired  => broadcast a beacon
-        UPDATE_ROUTE_TIMER_FIRED=2, // The timer for updating the route has been fired
-        SET_BEACONS_TIMER=3, // The interval of the timer for beacons has to be updated
-        DATA_PACKET_RECEIVED=4, // The node has received a data packet
-        BEACON_RECEIVED=5, // The node has received a data packet
-        RETRANSMITT_DATA_PACKET=6, // Try to re-send a data packet whose first sending attempt failed
-        CHECK_ACK_RECEIVED=7 // After the maximum time for receiving an ack has passed, check whether it has been received
+        SEND_PACKET_TIMER_FIRED=2, // The timer for data packets has been fired  => send a data packet
+        UPDATE_ROUTE_TIMER_FIRED=3, // The timer for updating the route has been fired
+        SET_BEACONS_TIMER=4, // The interval of the timer for beacons has to be updated
+        DATA_PACKET_RECEIVED=5, // The node has received a data packet
+        BEACON_RECEIVED=6, // The node has received a data packet
+        RETRANSMITT_DATA_PACKET=7, // Try to re-send a data packet whose first sending attempt failed
+        CHECK_ACK_RECEIVED=8 // After the maximum time for receiving an ack has passed, check whether it has been received
 };
 
 /*
@@ -32,7 +33,6 @@ enum{
  */
 
 enum{
-        CTP_ROOT=3,
         CTP_PULL= 0x80, // TEP 123: P field
         CTP_CONGESTED= 0x40, // TEP 123: C field
         BROADCAST_ADDRESS=0xffff, // A packet with such an address is sent to all the neighbor nodes
@@ -217,6 +217,121 @@ typedef struct _node_state{
 
         /* ROUTING ENGINE FIELDS - end */
 
+        /* FORWARDING ENGINE FIELDS - start */
+
+        /*
+         * FORWARDING POOL - start
+         *
+         * When a data packet has to be forwarded, the node extracts one entry from this pool, initializes it to the
+         * data of the data packet received and finally stores a pointer to the entry in the forwarding queue.
+         *
+         * The pool is nothing more than fixed-size array, whose elements are of type "forwarding_queue_entry": in fact
+         * packets to be forwarded are stored in the same output queue as packets created by the node itself and as soon
+         * as they reach the head of the queue they are sent.
+         *
+         * An entry is taken from the pool using the "get" method and it is given back to the pool using the "put"
+         * method: the entries are taken in order, according to their position, and are released in order.
+         *
+         * Two variables help handling the pool:
+         *
+         * 1-forwarding_pool_count
+         * 2-forwarding_pool_index
+         */
+
+        forwarding_queue_entry forwarding_pool[FORWARDING_POOL_DEPTH];
+        unsigned char forwarding_pool_count; // Number of elements in the pool
+        unsigned char forwarding_pool_index; // Index of the array where the next entry put will be collocated
+
+        /* FORWARDING POOL - end */
+
+        /*
+         * FORWARDING QUEUE - start
+         *
+         * An array of elements of pointers to "forwarding_queue_entry" represents the output queue of the node; pointers
+         * refer to packets (actually entries) created by the node or packets (entries) received by other nodes
+         * that have to be forwarded.
+         *
+         * Three variables are necessary to implement the logic of a FIFO queue using such an array:
+         *
+         * 1-forwarding_queue_count
+         * 2-forwarding_queue_head
+         * 3-forwarding_queue_tail
+         *
+         * They are all set to 0 at first. Entries are not explicitly cleared when elements are dequeued, nor the head
+         * of the queue is always represented by the first element of the array => the actual positions of the elements
+         * in the array don't correspond to their logical position within the queue.
+         *
+         * As a consequence, it is necessary to check the value of "forwarding_queue_count" in order to determine
+         * whether the queue is full or not.
+         *
+         * A packet is enqueued before being sent: when it reaches the head of the queue it is forwarded; at some point
+         * it is then dequeued
+         */
+
+        forwarding_queue_entry* forwarding_queue[FORWARDING_QUEUE_DEPTH];
+
+        unsigned char forwarding_queue_count; // The counter of the elements in the forwarding queue
+        unsigned char forwarding_queue_head; // The index of the first element in the queue (least recently added)
+        unsigned char forwarding_queue_tail; // The index of the last element in the queue (most recently added)
+
+        /* FORWARDING QUEUE - end */
+
+        /*
+         * OUTPUT CACHE - start
+         *
+         * An array of pointers to data packets represents the output LRU (Least Recently Used )cache of the node, where
+         * are stored the most recently packets sent by the node => it's used to avoid forwarding the same packet twice.
+         *
+         * NOTE it is assumed that the node does not produce duplicates on its own => duplicates only regard packets to
+         * be forwarded; usually they are caused by not acknowledged packets
+         *
+         * Two variables are necessary to implement the logic of a LRU cache:
+         *
+         * 1-output_cache_count
+         * 2-output_cache_first
+         *
+         * They are both set to 0 at first. Entries are not explicitly cleared when elements are removed, nor the least
+         * recent entry of the cache is always represented by the first element of the array => the actual positions of
+         * the elements in the array don't correspond to their logical position within the cache.
+         *
+         * As a consequence, it is necessary to check the value of "output_cache_count" in order to determine whether
+         * the cache is full or not.
+         *
+         * When a packet is inserted in the cache, it means it has been used => if the same packet is already in the
+         * cache, it is moved in order to indicate that it has been recently accessed, otherwise the element that was
+         * least recently used is removed
+         */
+
+        ctp_data_packet output_cache[CACHE_SIZE];
+
+        unsigned char output_cache_count; // Number of sent data packets cached
+        unsigned char output_cache_first; // Index of the entry in the cache that was least recently added
+
+        /* OUTPUT CACHE - end */
+
+        /*
+         * DATA PACKET
+         *
+         * Next data packet to be sent: it carries the actual payload the node wants to be delivered to the root of the
+         * tree
+         */
+
+        ctp_data_packet data_packet;
+
+        /*
+         * LOCAL FORWARDING QUEUE ENTRY
+         *
+         * The entry of the forwarding queue associated to the current node when this has some data to be sent
+         */
+
+        forwarding_queue_entry local_entry;
+
+        unsigned char data_packet_seqNo; // Sequence number of the data packet to be sent (initially 0)
+        unsigned char forwarding_engine_state; // Combination of flags indicating the state of the FORWARDING ENGINE; at
+        // first is 0
+
+        /* FORWARDING ENGINE FIELDS - end */
+
         bool root; // Boolean variable that is set to true if the node is the designated root of the collection tree
         node me; // ID and coordinates of this node (logical process)
         simtime_t lvt; // Value of the Local Virtual Time
@@ -225,5 +340,6 @@ typedef struct _node_state{
 void wait_until(unsigned int me,simtime_t timestamp,unsigned int type);
 void collected_data_packet(ctp_data_packet* packet);
 void broadcast_event(ctp_routing_packet* beacon,simtime_t time);
+void unicast_event(ctp_data_packet* packet,simtime_t time);
 
 #endif

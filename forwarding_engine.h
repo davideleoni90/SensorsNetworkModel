@@ -31,10 +31,16 @@ enum{
         DATA_PACKET_RETRANSMISSION_OFFSET=50,
 
         /*
-         * Interval of time after which the node tries to resend a data packet in case it has not chosend a parent yet
+         * Interval of time after which the node tries to resend a data packet in case it has not chosen a parent yet
          */
 
         NO_ROUTE_INTERVAL=100,
+
+        /*
+         * Period of the timer that triggers the sending of a new data packet
+         */
+
+        SEND_PACKET_TIMER=50,
         MIN_PAYLOAD=0, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
 };
@@ -69,9 +75,10 @@ typedef struct {
 
 /* FORWARDING ENGINE API */
 
-bool create_data_packet();
-void receive_ack(bool is_packet_acknowledged);
+void create_data_packet(node_state* state);
+void start_forwarding_engine(node_state* state);
+void receive_ack(bool is_packet_acknowledged,node_state* state);
 bool send_data_packet(node_state* state);
-bool forward_data_packet(ctp_data_packet* packet);
+bool forward_data_packet(ctp_data_packet* packet,node_state* state);
 
 #endif

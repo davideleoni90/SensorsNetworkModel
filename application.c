@@ -5,11 +5,20 @@
 #include "application.h"
 #include <math.h>
 #include "routing_engine.h"
+#include "forwarding_engine.h"
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
 unsigned char collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
 FILE* file; // Pointer to the file object associated to the configuration file
+
+/*
+ * ID of the node chosen as root of the collection tree => all the data packets will (hopefully) be collected by this
+ * node.
+ * If the ID of the node is not specified as parameter of the simulation, the default root is the node with ID=0
+ */
+
+unsigned int ctp_root=0;
 void parse_configuration_file(const char* path);
 void start_routing_engine(node_state* state);
 
@@ -109,6 +118,39 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         }
 
                         /*
+                         * Get the ID of the root node
+                         */
+
+                        if(IsParameterPresent(event_content, "root")){
+
+                                /*
+                                 * The ID of the node
+                                 */
+
+                                unsigned int root=GetParameterInt(event_content,"root");
+
+                                /*
+                                 * The user indicated the ID of the root node => check if it's valid and, if so, set the
+                                 * corresponding global value
+                                 */
+
+                                if(root<n_prc_tot)
+                                        ctp_root=root;
+                                else{
+
+                                        /*
+                                         * Abort because of invalid "root" parameter
+                                         */
+
+                                        printf("[FATAL ERROR] The given root ID is not valid: it has to be less that"
+                                                       "the number of LPs\n");
+                                        free((state));
+                                        exit(EXIT_FAILURE);
+                                }
+                        }
+
+
+                        /*
                          * Store ID and coordinates in the state; the latter come from the list of nodes
                          */
 
@@ -122,7 +164,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * If this is the root node, set the corresponding flag in the state object
                          */
 
-                        if(me==CTP_ROOT)
+                        if(me==ctp_root)
                                 state->root=true;
 
                         /*
@@ -137,8 +179,14 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         start_routing_engine(state);
 
+                        /*
+                         * Initialize the FORWARDING ENGINE
+                         */
 
-                        /* SET CTP STACK - start */
+                        start_forwarding_engine(state);
+
+
+                        /* SET CTP STACK - end */
 
                         // Start the simulation
                         //timestamp = (simtime_t) (20 * Random());
@@ -195,6 +243,22 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         schedule_beacons_interval_update(state);
                         break;
 
+                case SEND_PACKET_TIMER_FIRED:
+
+                        /*
+                         * It's time for the FORWARDING ENGINE to send a data packet to the root note
+                         */
+
+                        create_data_packet(state);
+
+                        /*
+                         * The time simulated through this event is periodic => schedule this event after the same amount
+                         * of time, starting from now
+                         */
+
+                        wait_until(me,now+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
+                        break;
+
                 case SET_BEACONS_TIMER:
 
                         /*
@@ -214,6 +278,21 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         receive_routing_packet(event_content,state);
 
+                        break;
+
+                case CHECK_ACK_RECEIVED:
+
+                        /*
+                         * When a node sends or forwards a data packet, this is not removed from the output queue until
+                         * an acknowledgment for the packet is received.
+                         * The node does not wait the acknowledgement forever, but just for a timeout time => this event
+                         * is processed by a node, when the timeout time has elapsed, in order to check whether the ack
+                         * has been received for not.
+                         * The fact that an acknowledgment has been received or not is, again, determined by the function
+                         * "message_received"
+                         */
+
+                        is_ack_received(state);
                         break;
 
                 default:
@@ -266,7 +345,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
  * This function is used to simulate a timer: the logical process (node) has to wait for the given interval of time =>
  * it schedules an event that it itself will process after the given interval of time
  *
- * @me: ID ofe the node
+ * @me: ID of the node
  * @timestamp: virtual clock time when the timer will be fired
  * @type: ID corresponding to the event => it is necessary for the logical process for deciding what to do next
  */
@@ -284,27 +363,13 @@ void wait_until(unsigned int me,simtime_t timestamp,unsigned int type){
  * BROADCAST EVENT
  *
  * Function invoked by the node, in particular, by its LINK ESTIMATOR layer, when it has to send a message to all the
- * other nodes in the sensors network, i.e. when the node has to send a beacon to its neighbors
- *
- * The simulator has to check, for each recipient node, whether it can receive the message, depending on how distant is
- * the sender.
- *
- * In fact it is necessary to simulate the fact that radio of sensor nodes has a limited coverage => a broadcast message
- * will be received only by those nodes whose distance from the sender is within a certain bound.
- *
- * This simulation model adopts the QUASI UNIT DISK GRAPH to model this fact.
- * Nodes can receive messages from their "neighbor nodes" => two nodes A and B are neighbors if the euclidean distance
- * between them is less than or equal to "r" (simulation parameter).
- * If their distance is less than or equal to "p" (simulation parameter), with p in the interval (0,r], messages sent
- * by A to B and by B to A are certainly delivered.
- * If their distance is in the range (p,r], messages sent by A to B and by B to A may or may not be delivered; the
- * closer the two nodes, the more likely that messages are delivered
+ * other nodes in the sensors network, i.e. when the node has to send a beacon to its neighbors.
  *
  * @beacon: the message to be broadcasted
  * @time: virtual time when the message should be delivered
  */
 
-void broadcast_event(ctp_routing_packet* beacon,simtime_t time){
+void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
 
         /*
          * Index used to iterate through nodes of the network
@@ -316,20 +381,14 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time){
          * Get the sender node: it's identity is reported in the physical overhead of the given packet
          */
 
-        node src=beacon->phy_mac_overhead.src;
+        node src = beacon->phy_mac_overhead.src;
 
         /*
          * For each node (logical process) calculate the euclidean distance from the sender and, depending on this,
-         * decide whether it should receive the message or not.
+         * check whether it receives the message or not.
          */
 
-        for(i=0;i<n_prc_tot;i++){
-
-                /*
-                 * Euclidean distance between the sender and the recipient of the message
-                 */
-
-                double distance;
+        for (i = 0; i < n_prc_tot; i++) {
 
                 /*
                  * Coordinates of the current node
@@ -341,66 +400,76 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time){
                  * Skip the sender of the message
                  */
 
-                if(i==src.ID)
+                if (i == src.ID)
                         continue;
 
                 /*
                  * Get coordinates of the current node from the dedicated list
                  */
 
-                recipient=nodes_list[i];
+                recipient = nodes_list[i];
 
                 /*
-                 * Calculate euclidean distance
+                 * If the message can be received by the neighbor, according to the simulator, it will process an event
+                 * of type "BEACON_RECEIVED"
                  */
 
-                distance=euclidean_distance(node.coordinates,recipient);
 
-                /*
-                 * Check the distance and decide how to proceed
-                 */
-
-                if(distance>NEIGHBORS_MAX_DISTANCE) {
-
-                        /*
-                         * Nodes are not neighbors => do nothing
-                         */
-
-                }
-                else{
-
-                        /*
-                         * Nodes are neighbors => if the distance is less than NEIGHBORS_SAFE_DISTANCE, deliver the
-                         * message to the recipient
-                         */
-
-                        if(distance<=NEIGHBORS_SAFE_DISTANCE)
-                                ScheduleNewEvent(i,time+MESSAGE_DELIVERY_TIME,BEACON_RECEIVED,beacon,
-                                                 sizeof(ctp_routing_packet));
-                        else{
-
-                                /*
-                                 * Choose a random number in the range [0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE]
-                                 * and add it to the current distance
-                                 */
-
-                                distance+=RandomRange(0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE);
-
-                                /*
-                                 * If the distance is not beyond NEIGHBORS_MAX_DISTANCE deliver the message, otherwise
-                                 * do nothing
-                                 *
-                                 * NOTE: closer neighbors have higher likelihood to receive the message
-                                 */
-
-                                if(distance<NEIGHBORS_MAX_DISTANCE)
-                                        ScheduleNewEvent(i,time+MESSAGE_DELIVERY_TIME,BEACON_RECEIVED,beacon,
-                                                         sizeof(ctp_routing_packet));
-                        }
-
-                }
+                if (message_received(src.coordinates, recipient))
+                        ScheduleNewEvent(i, time + MESSAGE_DELIVERY_TIME, BEACON_RECEIVED, beacon,
+                                         sizeof(ctp_routing_packet));
         }
+}
 
+/*
+ * UNICAST EVENT
+ *
+ * Function invoked by the node, in particular, by its FORWARDING ENGINE, when it has to a data packet to its parent.
+ *
+ * @packet: the message to be sent
+ * @time: virtual time when the message should be delivered
+ */
+
+void unicast_event(ctp_data_packet* packet,simtime_t time) {
+
+        /*
+         * Euclidean distance between the sender and the recipient of the message
+         */
+
+        double distance;
+
+        /*
+         * Coordinates of the parent node
+         */
+
+        node_coordinates recipient;
+
+        /*
+         * Get the sender node: it's identity is reported in the physical overhead of the given packet
+         */
+
+        node src = packet->phy_mac_overhead.src;
+
+        /*
+         * Get the recipient node: it's identity is reported in the physical overhead of the given packet
+         */
+
+        node dst = packet->phy_mac_overhead.dst;
+
+        /*
+         * Get coordinates of the current node from the dedicated list
+         */
+
+        recipient = nodes_list[dst.ID];
+
+        /*
+         * If the message can be received by the parent, according to the simulator, it will process an event of type
+         * "DATA_PACKET_RECEIVED"
+         */
+
+        if (message_received(recipient, src.coordinates))
+                ScheduleNewEvent(dst.ID, time + MESSAGE_DELIVERY_TIME, DATA_PACKET_RECEIVED, packet,
+                                 sizeof(ctp_data_packet));
 }
 
 /* SIMULATION API - end */
@@ -586,6 +655,42 @@ void parse_configuration_file(const char* path){
 }
 
 /*
+ * IS ACK RECEIVED
+ *
+ * Function corresponding to the event "CHECK_ACK_RECEIVED": asks the simulator whether the node has received an ack
+ * for the last data packet it sent and returns the result to the FORWARDING ENGINE
+ *
+ * @state: pointer to the object representing the current state of the node
+ */
+
+void is_ack_received(node_state* state){
+
+        /*
+         * First get the last packet sent by the node: it's the on that occupies the head of the forwarding queue
+         */
+
+        ctp_data_packet* packet=state->forwarding_queue[state->forwarding_queue_head]->data_packet;
+
+        /*
+         * Then extract the coordinates of the recipient node
+         */
+
+        node_coordinates recipient=packet->phy_mac_overhead.dst.coordinates;
+
+        /*
+         * Now ask the simulator whether the ask is received or not
+         */
+
+        bool ack_received=message_received(state->me.coordinates,recipient);
+
+        /*
+         * Tell the result to the FORWARDING ENGINE: it is in charge of deciding how to proceed
+         */
+
+        receive_ack(ack_received,state);
+}
+
+/*
  * EUCLIDEAN DISTANCE
  *
  * Return the euclidean distance between given nodes
@@ -610,6 +715,97 @@ double euclidean_distance(node_coordinates a,node_coordinates b){
          */
 
         return sqrt(x_difference*x_difference+y_difference*y_difference);
+}
+
+/*
+ * CAN RECEIVE MESSAGE?
+ *
+ * This function determines, given the coordinates of two nodes, whether or not a message sent by one of the two is
+ * received by the other one, and viceversa.
+ *
+ * In fact this models takes into account the fact that radio transceiver of sensor nodes has a limited coverage =>
+ * a broadcast message will be received only by those nodes whose distance from the sender is within a certain bound.
+ *
+ * This simulation model adopts the QUASI UNIT DISK GRAPH to represent this fact.
+ * Nodes can receive messages from their "neighbor nodes" => two nodes A and B are neighbors if the euclidean distance
+ * between them is less than or equal to "r" (simulation parameter).
+ * If their distance is less than or equal to "p" (simulation parameter), with p in the interval (0,r], messages sent
+ * by A to B and by B to A are certainly delivered.
+ * If their distance is in the range (p,r], messages sent by A to B and by B to A may or may not be delivered
+ * => for two such nodes this function may return different values every time it is executed; anyway, the closer the two
+ * nodes, the more likely that messages are delivered
+ *
+ * @a: coordinates of a node
+ * @b: coordinates of the other node
+ *
+ * Returns true if a message sent by one of the two nodes can be received by the other one, false otherwise
+ */
+
+bool message_received(node_coordinates a,node_coordinates b){
+
+        /*
+         * Get the euclidean distance between the nodes
+         */
+
+        double distance=euclidean_distance(a,b);
+
+        /*
+         * Check that the distance is not null: if so, it means that two nodes with different IDs have the same
+         * coordinates => there's an error in the configuration file => exit with error
+         */
+
+        if(!distance){
+                printf("[FATAL ERROR] Two different nodes have the same coordinates => fix the coordinates in"
+                               "the configuration file\n");
+                exit(EXIT_FAILURE);
+        }
+
+        /*
+         * Check the distance and decide how to proceed
+         */
+
+        if(distance>NEIGHBORS_MAX_DISTANCE) {
+
+                /*
+                 * Nodes are not neighbors => no way a message can be received => return false
+                 */
+
+                return false;
+
+        }
+        else{
+
+                /*
+                 * Nodes are neighbors => if the distance is less than NEIGHBORS_SAFE_DISTANCE, the message is delivered
+                 * to the recipient
+                 */
+
+                if(distance<=NEIGHBORS_SAFE_DISTANCE)
+                        return true;
+                else{
+
+                        /*
+                         * Choose a random number in the range [0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE]
+                         * and add it to the current distance
+                         */
+
+                        distance+=RandomRange(0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE);
+
+                        /*
+                         * If the distance is not beyond NEIGHBORS_MAX_DISTANCE the message is delivered and true is
+                         * returned; otherwise false is returned
+                         *
+                         * NOTE: closer neighbors have higher likelihood to receive the message
+                         */
+
+                        if(distance<NEIGHBORS_MAX_DISTANCE)
+                                return true;
+                        else
+                                return false;
+                }
+
+        }
+
 }
 
 /* SIMULATION FUNCTIONS - end */
