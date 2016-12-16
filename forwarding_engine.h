@@ -88,5 +88,6 @@ void receive_ack(bool is_packet_acknowledged,node_state* state);
 bool receive_data_packet(void* message,node_state* state);
 bool send_data_packet(node_state* state);
 void forward_data_packet(ctp_data_packet* packet,node_state* state);
+bool is_congested(node_state* state);
 
 #endif

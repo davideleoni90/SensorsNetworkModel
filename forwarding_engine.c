@@ -691,6 +691,15 @@ bool send_data_packet(node_state* state) {
         first_entry->data_packet->data_packet_frame.options&=~CTP_PULL;
 
         /*
+         * Check if the node is congested: if so, set the flag in the packet, otherwise clear the flag
+         */
+
+        if(is_congested(state))
+                first_entry->data_packet->data_packet_frame.options|=CTP_CONGESTED;
+        else
+                first_entry->data_packet->data_packet_frame.options&=~CTP_CONGESTED;
+
+        /*
          * Get the ID and coordinates of the recipient (parent node) from the routing engine
          */
 
@@ -1196,4 +1205,40 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
 
                 send_data_packet(state);
         }
+}
+
+/*
+ * IS THE NODE CONGESTED
+ *
+ * This function is invoked by the ROUTING ENGINE to get to know whether the node is congested, i.e. half of its
+ * forwarding queue is full.
+ * The ROUTING ENGINE asks about congestion before sending beacons to neighbors: if it is congested, it sets the flag
+ * CONGESTION in the beacons sent => in this way, neighbors are aware that the node is congested and won't add further
+ * workload to it by sending data packets
+ *
+ * @state: pointer to the object representing the current state of the node
+ *
+ * Returns true if more than half of the forwarding queue is full, false otherwise
+ */
+
+bool is_congested(node_state* state){
+
+        /*
+         * Get the counter of elements in the forwarding queue
+         */
+
+        unsigned char count=state->forwarding_queue_count;
+
+        /*
+         * Return true if more than half is full...
+         */
+
+        if(count>FORWARDING_QUEUE_DEPTH/2)
+                return true;
+
+        /*
+         * ...false otherwise
+         */
+
+        return false;
 }

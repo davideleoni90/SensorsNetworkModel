@@ -381,10 +381,10 @@ void update_route(node_state* state){
         unsigned char i;
 
         /*
-         * Route of the current node
+         * Pointer to the rooute of the current node
          */
 
-        route_info route;
+        route_info* route;
 
         /*
          * Pointer to the current entry of the routing table, used during a scan
@@ -417,12 +417,6 @@ void update_route(node_state* state){
         unsigned short current_one_hop_etx;
 
         /*
-         * ETX of the path through the actual route
-         */
-
-        unsigned short actual_etx;
-
-        /*
          * If the current node is the root of the tree, there's no parent to select, so just return false
          */
 
@@ -447,7 +441,7 @@ void update_route(node_state* state){
          * Get the route of the node from its state object
          */
 
-        route=state->route;
+        route=&state->route;
 
         /*
          * Scan the entries of the routing table in order to select the new parent of the node
@@ -487,16 +481,15 @@ void update_route(node_state* state){
                  * Check whether the node analyzed is the actual parent of the node
                  */
 
-                if(current_entry->neighbor==route.parent){
+                if(current_entry->neighbor==route->parent){
 
                         /*
                          * In case the node analyzed is the actual parent of the node, update the corresponding entry
                          * and the "route" variable
                          */
 
-                        actual_etx=current_etx;
-                        route.etx=current_entry->info.etx;
-                        //route.congested=current_entry->info.congested;
+                        route->etx=current_entry->info.etx;
+                        route->congested=current_entry->info.congested;
 
                         /*
                          * Jump to the next entry in the table
@@ -565,7 +558,7 @@ void update_route(node_state* state){
                  *     less than the route passing through the actual parent
                  */
 
-                if(current_etx==INFINITE_ETX || (route.congested && (min_etx<(route.etx+10))) ||
+                if(current_etx==INFINITE_ETX || (route->congested && (min_etx<(route->etx+10))) ||
                    (min_etx+PARENT_SWITCH_THRESHOLD<current_etx)){
 
                         /*
@@ -579,7 +572,7 @@ void update_route(node_state* state){
                          * unpinned before removal
                          */
 
-                        unpin_neighbor(route.parent,estimator_table);
+                        unpin_neighbor(route->parent,estimator_table);
 
                         /*
                          * Now pin the entry corresponding to the new parent
@@ -598,19 +591,19 @@ void update_route(node_state* state){
                          * First set the ID of the new parent
                          */
 
-                        route.parent=best_entry->neighbor;
+                        route->parent=best_entry->neighbor;
 
                         /*
                          * Then set the corresponding ETX
                          */
 
-                        route.etx=best_entry->info.etx;
+                        route->etx=best_entry->info.etx;
 
                         /*
                          * Finally copy the "congested" flag from the new parent
                          */
 
-                        route.congested=best_entry->info.congested;
+                        route->congested=best_entry->info.congested;
                 }
         }
 }
@@ -785,7 +778,7 @@ void send_beacon(node_state* state){
          * frame of the beacon being sent
          */
 
-        if(is_congested())
+        if(is_congested(state))
                 routing_frame->options|=CTP_CONGESTED;
 
         /*
@@ -897,7 +890,7 @@ void receive_beacon(ctp_routing_frame* routing_frame, node from,node_state*state
                  * Possibly update the route
                  */
 
-                update_neighbor_congested(from.ID,congested);
+                update_neighbor_congested(from.ID,state,congested);
         }
 
         /*

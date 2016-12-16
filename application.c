@@ -4,8 +4,6 @@
 #include <ROOT-Sim.h>
 #include "application.h"
 #include <math.h>
-#include "routing_engine.h"
-#include "forwarding_engine.h"
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
@@ -19,8 +17,13 @@ FILE* file; // Pointer to the file object associated to the configuration file
  */
 
 unsigned int ctp_root=0;
+
+/* DECLARATIONS */
+
 void parse_configuration_file(const char* path);
 void start_routing_engine(node_state* state);
+bool is_ack_received(node_state* state);
+bool message_received(node_coordinates a,node_coordinates b);
 
 /*
  * Pointer to the dynamically allocated array containing the list of the the coordinates of the nodes in the network
@@ -450,12 +453,6 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
 void unicast_event(ctp_data_packet* packet,simtime_t time) {
 
         /*
-         * Euclidean distance between the sender and the recipient of the message
-         */
-
-        double distance;
-
-        /*
          * Coordinates of the parent node
          */
 
@@ -521,7 +518,7 @@ void parse_configuration_file(const char* path){
          * set to 0, getline allocates a buffer for storing the line; "read" is the length of line
          */
 
-        ssize_t len=0;
+        size_t len=0;
         char * lineptr=NULL;
 
         /*
