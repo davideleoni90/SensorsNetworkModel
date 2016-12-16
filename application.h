@@ -132,14 +132,12 @@ typedef struct _ctp_data_packet{
 typedef struct _route_info{
         unsigned int parent; // ID of the parent node
         unsigned short etx; // ETX of the parent node + 1-hop ETX of the link to the parent node
-        //bool congested;
+        bool congested; // Boolean flag telling whether the node is congested (half of its forwarding queue full) or not
 }route_info;
 
 typedef struct _routing_table_entry{
         unsigned int neighbor;
         route_info info;
-
-
 }routing_table_entry;
 
 /*

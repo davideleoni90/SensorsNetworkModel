@@ -259,6 +259,16 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         wait_until(me,now+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
                         break;
 
+                case RETRANSMITT_DATA_PACKET:
+
+                        /*
+                         * This event is delivered to the node in order for it to transmit again the last data packet
+                         * sent: this is due to the fact that the packet has been acknowledged by the recipient
+                         */
+
+                        send_data_packet(state);
+                        break;
+
                 case SET_BEACONS_TIMER:
 
                         /*
@@ -280,6 +290,15 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         break;
 
+                case DATA_PACKET_RECEIVED:
+
+                        /*
+                         * The node has received a data packet => let the FORWARDING ENGINE process it
+                         */
+
+                        receive_data_packet((ctp_data_packet*)event_content,state);
+                        break;
+
                 case CHECK_ACK_RECEIVED:
 
                         /*
@@ -296,8 +315,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         break;
 
                 default:
-                        //fprintf(stdout, "PCS: Unknown event type! (me = %d - event type = %d)\n", me, event_type);
-                        //abort();
                         collected_packets++;
 
         }
@@ -661,9 +678,12 @@ void parse_configuration_file(const char* path){
  * for the last data packet it sent and returns the result to the FORWARDING ENGINE
  *
  * @state: pointer to the object representing the current state of the node
+ *
+ * Returns the bool value indicating whether the message has been received by the recipient: if it is received, the
+ * recipient receives the corresponding event
  */
 
-void is_ack_received(node_state* state){
+bool is_ack_received(node_state* state){
 
         /*
          * First get the last packet sent by the node: it's the on that occupies the head of the forwarding queue
@@ -688,6 +708,12 @@ void is_ack_received(node_state* state){
          */
 
         receive_ack(ack_received,state);
+
+        /*
+         * Return the response from the simulator
+         */
+
+        return ack_received;
 }
 
 /*

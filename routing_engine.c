@@ -21,60 +21,20 @@
  *
  */
 
-#include <stddef.h>
 #include <ROOT-Sim.h>
 #include "application.h"
 
 //TODO node_running
 
 /*
- * ROUTING PACKET (BEACON)
- *
- * Next routing packet to be sent: it contains the routing information of the node, namely the expected number of hops
- * necessary for him to deliver a message to the root of the collection tree
+ * Method to initialize a variable describing a path from one node to the root: simply sets all the fields to  their
+ * default value
  */
 
-//ctp_routing_packet routing_packet;
-
-//route_info route; // The route from the current node to the root
-//unsigned char self; // ID of the current node
-//bool is_root; // Boolean variable which is set if the current node is the root of the collection tree
-
-/* VIRTUAL TIME */
-
-//extern simtime_t timestamp;
-
-/*
- * BEACONS INTERVAL/SENDING TIME
- */
-
-/*
- * The current value of I_b
- */
-
-//unsigned long current_interval;
-
-/*
- * Instant of time when the next beacon will be sent; it is chosen within the interval [I_b/2 , I_b]
- */
-
-//unsigned long beacon_sending_time;
-
-/*
- * ROUTING TABLE
- *
- * An array of routing_table_entry with a number of ROUTING_TABLE_SIZE elements, each corresponding to a neighbor node
- * => the routing engine maintains for each the value of ETX and selects the one with the lowest value as parent
- */
-
-//routing_table_entry routing_table[ROUTING_TABLE_SIZE];
-//unsigned char neighbors; // Number of active entries in the routing table
-
-/*
-         * Initialize the pointer to the next beacon to be sent
-         */
-
-//routing_frame=&routing_packet;
+void init_route_info(route_info * route) {
+        route->parent= INVALID_ADDRESS; // ID of the parent of the node associated to the entry
+        route->etx = 0; // multi-hop etx of the node
+}
 
 /*
  * START ROUTING ENGINE
@@ -123,16 +83,6 @@ void start_routing_engine(node_state* state){
 }
 
 /*
- * Method to initialize a variable describing a path from one node to the root: simply sets all the fields to  their
- * default value
- */
-
-void init_route_info(route_info * route) {
-        route->parent= INVALID_ADDRESS; // ID of the parent of the node associated to the entry
-        route->etx = 0; // multi-hop etx of the node
-}
-
-/*
  * FIND INDEX ROUTING TABLE
  *
  * Find the entry in the routing table matching the given ID
@@ -163,7 +113,7 @@ unsigned char find_index_routing_table(unsigned int address,routing_table_entry*
          * Scan the routing table and stop when an entry matching the given ID is found
          */
 
-        for (int index = 0; index < neighbors; ++index) {
+        for (index = 0; index < neighbors; ++index) {
                 if(routing_table[index].neighbor==address)
                         break;
         }
@@ -255,9 +205,13 @@ void remove_entry_routing_table(unsigned int address,node_state* state){
  * a route update in order to select the sender as new parent.
  * Finally, if the node that sent the beacon is the actual parent of the node that received it and the sender is
  * congested, the receiver triggers a route update in order to select another node as parent.
+ *
+ * @address: ID of the neighbor node whose entry has to be updated
+ * @state: pointer to the object representing the current state of the node
+ * @congested: boolean flag indicating whether the neighbor is congested or not
  */
 
-void update_neighbor_congested(unsigned int address,bool congested){
+void update_neighbor_congested(unsigned int address,node_state* state,bool congested){
 
         /*
          * Index of the entry in the ROUTING TABLE corresponding to the given address
@@ -269,28 +223,28 @@ void update_neighbor_congested(unsigned int address,bool congested){
          * Find the index
          */
 
-        index=find_index_routing_table(address);
+        index=find_index_routing_table(address,state->routing_table,state->neighbors);
 
         /*
          * If an entry corresponding to the given address exists, the index returned is less than the actual value of
          * variable "neighbors" => check such an entry exists
          */
 
-        if(index<neighbors){
+        if(index<state->neighbors){
 
                 /*
                  * Update the "congested" flag of the given neighbor
                  */
 
-                routing_table[index].info.congested=congested;
+                state->routing_table[index].info.congested=congested;
 
                 /*
                  * If the given node is congested and it's the actual parent or if the actual route is congested and the
-                 * given node is not, trigger the route update
+                 * given node is not, trigger the route update because maybe a better parent node can be found
                  */
 
-                if((congested && route.parent==address) ||(!congested && route.congested))
-                        update_route();
+                if((congested && state->route.parent==address) ||(!congested && state->route.congested))
+                        update_route(state);
         }
 }
 
@@ -472,7 +426,7 @@ void update_route(node_state* state){
          * If the current node is the root of the tree, there's no parent to select, so just return false
          */
 
-        if(state->me.ID==CTP_ROOT)
+        if(state->root)
                 return;
 
         /*
@@ -499,13 +453,13 @@ void update_route(node_state* state){
          * Scan the entries of the routing table in order to select the new parent of the node
          */
 
-        for(i=0;i<neighbors;i++){
+        for(i=0;i<state->neighbors;i++){
 
                 /*
                  * Get current entry
                  */
 
-                current_entry=&routing_table[i];
+                current_entry=&state->routing_table[i];
 
                 /*
                  * Skip entries whose "parent" field is not valid or is set to the the same ID as the one of the
@@ -520,7 +474,7 @@ void update_route(node_state* state){
                  * Contact the link estimator asking for the 1-hop ETX of the neighbor currently analyzed
                  */
 
-                current_one_hop_etx=get_one_hop_etx(state->me.ID,current_entry->neighbor);
+                current_one_hop_etx=get_one_hop_etx(current_entry->neighbor,state->link_estimator_table);
 
                 /*
                  * Compute the ETX of the route through the current entry of the routing table: it's the sum of the
@@ -873,8 +827,7 @@ void send_beacon(node_state* state){
          * estimator for this service
          */
 
-        send_routing_packet(routing_packet,state->link_estimator_table,state->beacon_sequence_number, state->me,
-                state->lvt);
+        send_routing_packet(routing_packet,state->beacon_sequence_number, state->me, state->lvt);
 
         /*
          * Update the beacon sequence number
@@ -1002,9 +955,11 @@ void neighbor_evicted(unsigned int address,node_state* state){
  * ROUTING TABLE
  *
  * Otherwise it returns false (insertion is discouraged)
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-bool is_neighbor_worth_inserting(ctp_routing_frame* routing_frame){
+bool is_neighbor_worth_inserting(ctp_routing_frame* routing_frame,node_state* state){
 
         /*
          * Return value: should the neighbor be inserted or not?
@@ -1043,27 +998,35 @@ bool is_neighbor_worth_inserting(ctp_routing_frame* routing_frame){
         neighbor_etx=routing_frame->ETX;
 
         /*
-         * Check every single entry of the ROUTING TABLE and for each check if the corresponding ETX is less than the one of the new
-         * neighbor: if such an entry is found, stop the loop and return true
+         * If the etx reported in the packet is 0, it means that the sender is the root node => it is crucial to add it
+         * to the estimator table => return true
          */
 
-        for(i=0;i<neighbors && !insert;i++){
+        if(!neighbor_etx)
+                return true;
+
+        /*
+         * Check every single entry of the ROUTING TABLE and for each check if the corresponding ETX is less than the
+         * one of the new neighbor: if such an entry is found, stop the loop and return true
+         */
+
+        for(i=0;i<state->neighbors && !insert;i++){
 
                 /*
                  * Get the current entry
                  */
 
-                entry=&routing_table[i];
+                entry=&state->routing_table[i];
 
                 /*
                  * Skip the parent of this node, because it can't be removed
                  */
 
-                if(entry->neighbor=route.parent)
+                if(entry->neighbor==state->route.parent)
                         continue;
 
                 /*
-                 * Get the ETX of the curren entry
+                 * Get the ETX of the current entry
                  */
 
                 etx=entry->info.etx;

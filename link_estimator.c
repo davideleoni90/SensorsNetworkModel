@@ -19,7 +19,6 @@
 
 #include "link_estimator.h"
 #include "application.h"
-#include "routing_engine.h"
 
 /*
  * LINK ESTIMATOR TABLE OPERATIONS - start
@@ -771,8 +770,7 @@ bool clear_data_link_quality(unsigned int address,link_estimator_table_entry* li
  * @now: current value of local virtual time
  */
 
-void send_routing_packet(ctp_routing_packet* beacon,link_estimator_table_entry* link_estimator_table,
-                         unsigned char beacon_sequence,node me,simtime_t now){
+void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequence,node me,simtime_t now){
 
         /*
          * Pointer to the physical and data link frame of the beacon that is being sent
@@ -821,10 +819,10 @@ void send_routing_packet(ctp_routing_packet* beacon,link_estimator_table_entry* 
 
         /*
          * At this point the beacon is well formed, so it's time to send it to the specified destination => schedule a
-         * new brodcast event
+         * new broadcast event
          */
 
-        broadcast_event(&beacon,now);
+        broadcast_event(beacon,now);
 }
 
 /*
@@ -1201,12 +1199,13 @@ void update_neighbor_entry(unsigned char index, unsigned char seq,link_estimator
  *
  * @physical_link_frame: pointer to the physical layer frame of the beacon received by the node
  * @link_estimator_frame: pointer to the link estimator frame of the beacon received by the node
- * @link_estimator_table: pointer to the link estimator table of the node
+ * @routing_frame: pointer to the routing frame of the beacon received by the node
+ *
  * @state: pointer to the object representing the current state of the node
  */
 
 void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_link_estimator_frame* link_estimator_frame,
-                             node_state* state){
+                             ctp_routing_frame* routing_frame,node_state* state){
 
         /*
          * Index of the entry int the neighbor table corresponding sender: had no message ever been received from  the
@@ -1336,34 +1335,43 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
                                          *
                                          * This model ignores the white bit, so a beacon is always further processed.
                                          *
-                                         * In particular, a random entry is (hopefully) selected and replaced with the
-                                         * entry for the new neighbor => get the index of random entry to be evicted
+                                         * In particular, the LINK ESTIMATOR asks the ROUTING ENGINE whether the node
+                                         * should be taken into account (because it's important for routing) or not
+                                         * => if the ROUTING ENGINE agrees on considering the node, a random entry is
+                                         * (hopefully) selected and replaced with the entry for the new neighbor
                                          */
 
-                                        index=find_random_entry(link_estimator_table);
-
-                                        /*
-                                         * Check if an entry VALID AND NOT PINNED NOR MATURE exists; if this is not the
-                                         * case, the LINK ESTIMATOR discards the beacon
-                                         */
-
-                                        if(index!=INVALID_ENTRY){
+                                        if(is_neighbor_worth_inserting(routing_frame,state)) {
 
                                                 /*
-                                                 * A victim entry has been randomly found => first notify the ROUTING
-                                                 * ENGINE about the fact that the neighbor corresponding to the entry
-                                                 * has been removed from the estimator table; in fact, SUCH A NEIGHBOR
-                                                 * IS NO LONGER ELIGIBLE AS A PARENT, SO IT HAS TO BE REMOVED FROM THE
-                                                 * ROUTING TABLE
+                                                 * Get the index of random entry to be evicted
                                                  */
 
-                                                neighbor_evicted(sender.ID,state);
+                                                index = find_random_entry(link_estimator_table);
 
                                                 /*
-                                                 * Replace the victim entry with the one of the new neighbor
+                                                 * Check if an entry VALID AND NOT PINNED NOR MATURE exists; if this is
+                                                 * not the case, the LINK ESTIMATOR discards the beacon
                                                  */
 
-                                                init_estimator_entry(sender,index,link_estimator_table);
+                                                if (index != INVALID_ENTRY) {
+
+                                                        /*
+                                                         * A victim entry has been randomly found => first notify the
+                                                         * ROUTING ENGINE about the fact that the neighbor corresponding
+                                                         * to the entry has been removed from the estimator table; in
+                                                         * fact, SUCH A NEIGHBOR IS NO LONGER ELIGIBLE AS A PARENT, SO
+                                                         * IT HAS TO BE REMOVED FROM THE ROUTING TABLE
+                                                         */
+
+                                                        neighbor_evicted(sender.ID, state);
+
+                                                        /*
+                                                         * Replace the victim entry with the one of the new neighbor
+                                                         */
+
+                                                        init_estimator_entry(sender, index, link_estimator_table);
+                                                }
                                         }
 
                                 }
@@ -1392,26 +1400,20 @@ void receive_routing_packet(void* message,node_state* state){
          * Parse the buffer received to a routing packet (beacon)
          */
 
-        ctp_routing_packet beacon=*((ctp_routing_packet*)message);
-
-        /*
-         * Get a pointer to the link estimator table of the current node
-         */
-
-        link_estimator_table_entry* link_estimator_table=state->link_estimator_table;
+        ctp_routing_packet* beacon=((ctp_routing_packet*)message);
 
         /*
          * Extract the physical and the link estimator frames from the beacon and process it at this level
          * (LINK ESTIMATOR)
          */
 
-        process_received_beacon(&beacon.phy_mac_overhead,&beacon.link_estimator_frame,state);
+        process_received_beacon(&beacon->phy_mac_overhead,&beacon->link_estimator_frame,&beacon->routing_frame,state);
 
         /*
          * Then extract the routing layer frame and pass it to the ROUTING ENGINE
          */
 
-        receive_beacon(&beacon.routing_frame,beacon.phy_mac_overhead.src,state);
+        receive_beacon(&beacon->routing_frame,beacon->phy_mac_overhead.src,state);
 }
 
 /*
