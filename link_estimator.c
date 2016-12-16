@@ -552,13 +552,13 @@ unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* 
  * GET PARENT COORDINATES
  *
  * Function used by the routing engine to get the coordinates of the neighbor that is currently selected as parent of
- * the current node
+ * the current node; returns "NULL" if the given parent ID is not valid
  *
  * @parent: ID of the current parent
  * @link_estimator_table: pointer to the link estimator table of the node
  */
 
-node_coordinates get_parent_coordinates(unsigned int parent,link_estimator_table_entry* link_estimator_table){
+node_coordinates* get_parent_coordinates(unsigned int parent,link_estimator_table_entry* link_estimator_table){
 
         /*
          * Index of the entry in the estimator table corresponding to the parent
@@ -588,7 +588,7 @@ node_coordinates get_parent_coordinates(unsigned int parent,link_estimator_table
          * The given ID has a corresponding entry in the estimator table => return the value of the coordinates
          */
 
-        return link_estimator_table[index].neighbor.coordinates;
+        return &link_estimator_table[index].neighbor.coordinates;
 }
 
 /*
@@ -785,6 +785,18 @@ void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequenc
         ctp_link_estimator_frame* link_estimator_frame;
 
         /*
+         * Coordinates of the recipient: since it's a broadcast message, set it to 0,0
+         */
+
+        node_coordinates coordinates={0,0};
+
+        /*
+         * Structure representing the recipient
+         */
+
+        node recipient={BROADCAST_ADDRESS,coordinates};
+
+        /*
          * Extract the physical and data link frame from the given beacon
          */
 
@@ -802,7 +814,7 @@ void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequenc
          * estimator table
          */
 
-        phy_mac_overhead->dst={BROADCAST_ADDRESS,{0,0}};
+        phy_mac_overhead->dst=recipient;
 
         /*
          * Extract the link estimator frame from the given beacon
@@ -822,6 +834,7 @@ void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequenc
          * new broadcast event
          */
 
+        printf("%d sends beacon\n",me.ID);
         broadcast_event(beacon,now);
 }
 

@@ -46,6 +46,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
         node_state *state;
 
         /*
+         * The structure representing this node
+         */
+
+        node this_node;
+
+        /*
          * Initialize the local pointer to the pointer provided by the simulator
          */
 
@@ -65,7 +71,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
         switch(event_type) {
 
                 case INIT:
-
 
                         /*
                          * NODE INITIALIZATION
@@ -111,8 +116,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * Parse the configuration file: if this is not specified, return with error
                          */
 
-                        if(IsParameterPresent(event_content, "path"))
-                                parse_configuration_file(GetParameterString(event_content,"path"));
+                        if(IsParameterPresent(event_content, "path")) {
+                                parse_configuration_file(GetParameterString(event_content, "path"));
+                        }
                         else{
                                 printf("[FATAL ERROR] The path a to configuration file is mandatory => specify it after "
                                                "the argument \"path\"\n");
@@ -157,7 +163,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * Store ID and coordinates in the state; the latter come from the list of nodes
                          */
 
-                        state->me={me,nodes_list[me]};
+                        this_node.ID=me;
+                        this_node.coordinates=nodes_list[me];
+                        state->me=this_node;
 
                         /* GET PARAMETERS OF THE SIMULATION - end */
 
@@ -190,22 +198,11 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
 
                         /* SET CTP STACK - end */
-
-                        // Start the simulation
-                        //timestamp = (simtime_t) (20 * Random());
-                        //ScheduleNewEvent(me, timestamp, START_CALL, NULL, 0);
-
-                        // If needed, start the first fading recheck
-//			if (state->fading_recheck) {
-                        //timestamp = (simtime_t) (FADING_RECHECK_FREQUENCY * Random());
-                        ScheduleNewEvent(me, now+1, 0, NULL, 0);
-//			}
-
-
-
                         break;
 
                 case UPDATE_ROUTE_TIMER_FIRED:
+
+                        //printf("UPDATING ROUTE for %d initialized \n",state->me.ID);
 
                         /*
                          * It's time for the ROUTING ENGINE to update the route of the node => invoke the dedicated
@@ -223,6 +220,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         break;
 
                 case SEND_BEACONS_TIMER_FIRED:
+
+                        //printf("SEND_BEACONS_TIMER_FIRED for %d initialized \n",state->me.ID);
 
                         /*
                          * It's time for the ROUTING ENGINE to send a beacon to its neighbors => before doing this,
@@ -248,6 +247,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case SEND_PACKET_TIMER_FIRED:
 
+                        //printf("SEND_PACKET_TIMER_FIRED for %d initialized \n",state->me.ID);
+
                         /*
                          * It's time for the FORWARDING ENGINE to send a data packet to the root note
                          */
@@ -264,6 +265,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case RETRANSMITT_DATA_PACKET:
 
+                        //printf("RETRANSMITT_DATA_PACKET for %d initialized \n",state->me.ID);
+
                         /*
                          * This event is delivered to the node in order for it to transmit again the last data packet
                          * sent: this is due to the fact that the packet has been acknowledged by the recipient
@@ -274,6 +277,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case SET_BEACONS_TIMER:
 
+                        //printf("SET_BEACONS_TIMER for %d initialized \n",state->me.ID);
+
                         /*
                          * This event is processed when the interval associated to the timer for beacons has to be
                          * updated
@@ -283,6 +288,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         break;
 
                 case BEACON_RECEIVED:
+
+                        //printf("BEACON_RECEIVED for %d initialized \n",state->me.ID);
 
                         /*
                          * A beacon has been received => possibly update the neighbor and the routing table; the
@@ -295,6 +302,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case DATA_PACKET_RECEIVED:
 
+                        //printf("DATA_PACKET_RECEIVED for %d initialized \n",state->me.ID);
+
                         /*
                          * The node has received a data packet => let the FORWARDING ENGINE process it
                          */
@@ -303,6 +312,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         break;
 
                 case CHECK_ACK_RECEIVED:
+
+                        //printf("CHECK_ACK_RECEIVED for %d initialized \n",state->me.ID);
 
                         /*
                          * When a node sends or forwards a data packet, this is not removed from the output queue until
@@ -354,7 +365,9 @@ bool OnGVT(unsigned int me, void*snapshot) {
          * The node is not the root or is the root but the number of data packets collected is not yet sufficient to
          * stop the simulation
          */
-        return true;
+
+        if(collected_packets>0)
+                return true;
 }
 
 /* SIMULATION API - start */
@@ -435,9 +448,11 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
                  */
 
 
-                if (message_received(src.coordinates, recipient))
+                if (message_received(src.coordinates, recipient)) {
+                        printf("Node %d can receive message of %d\n",src.ID,i);
                         ScheduleNewEvent(i, time + MESSAGE_DELIVERY_TIME, BEACON_RECEIVED, beacon,
                                          sizeof(ctp_routing_packet));
+                }
         }
 }
 
@@ -481,9 +496,11 @@ void unicast_event(ctp_data_packet* packet,simtime_t time) {
          * "DATA_PACKET_RECEIVED"
          */
 
-        if (message_received(recipient, src.coordinates))
+        if (message_received(recipient, src.coordinates)) {
+                printf("Node %d can receive message of %d\n",src.ID,dst.ID);
                 ScheduleNewEvent(dst.ID, time + MESSAGE_DELIVERY_TIME, DATA_PACKET_RECEIVED, packet,
                                  sizeof(ctp_data_packet));
+        }
 }
 
 /* SIMULATION API - end */
@@ -575,12 +592,6 @@ void parse_configuration_file(const char* path){
 
                 if(lines==n_prc_tot)
                         break;
-
-                /*
-                 * DEBUG PRINT
-                 */
-
-                //printf("Line %d: %s\n",lines,lineptr);
 
                 /*
                  * Parse the x coordinate
@@ -699,6 +710,7 @@ bool is_ack_received(node_state* state){
          */
 
         bool ack_received=message_received(state->me.coordinates,recipient);
+        printf("Node %d can receive message of %d? %d\n",state->me.ID,packet->phy_mac_overhead.dst.ID,ack_received);
 
         /*
          * Tell the result to the FORWARDING ENGINE: it is in charge of deciding how to proceed
@@ -725,13 +737,13 @@ double euclidean_distance(node_coordinates a,node_coordinates b){
          * Difference between x coordinates of the nodes
          */
 
-        double x_difference=a.x-b.x;
+        int x_difference=a.x-b.x;
 
         /*
          * Difference between y coordinates of the nodes
          */
 
-        double y_difference=a.y-b.y;
+        int y_difference=a.y-b.y;
 
         /*
          * Return euclidean distance
@@ -829,6 +841,10 @@ bool message_received(node_coordinates a,node_coordinates b){
 
         }
 
+}
+
+void collected_data_packet(ctp_data_packet* packet){
+        collected_packets++;
 }
 
 /* SIMULATION FUNCTIONS - end */

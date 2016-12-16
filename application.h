@@ -53,7 +53,7 @@ enum{
          * Maximum euclidean distance between two nodes for them to be considered neighbors
          */
 
-        NEIGHBORS_MAX_DISTANCE=4,
+        NEIGHBORS_MAX_DISTANCE=10,
 
         /*
          * If the euclidean distance between two neighbor nodes is less than this constants, every message sent by
@@ -61,7 +61,7 @@ enum{
          * message may or may not be received
          */
 
-        NEIGHBORS_SAFE_DISTANCE=2
+        NEIGHBORS_SAFE_DISTANCE=6
 };
 
 /*

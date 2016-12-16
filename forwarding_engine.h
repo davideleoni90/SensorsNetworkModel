@@ -2,7 +2,6 @@
 #define SENSORSNETWORKMODELPROJECT_FORWARDING_ENGINE_H
 
 #include <stdbool.h>
-//#include "application.h"
 typedef struct _ctp_data_packet ctp_data_packet;
 
 
@@ -22,32 +21,32 @@ enum{
          * and reacts properly
          */
 
-        DATA_PACKET_ACK_OFFSET=50,
+        DATA_PACKET_ACK_OFFSET=3,
 
         /*
          * Interval of time after which the node tries to resend a data packet that has not been acknowledged
          */
 
-        DATA_PACKET_RETRANSMISSION_OFFSET=50,
+        DATA_PACKET_RETRANSMISSION_OFFSET=3,
 
         /*
          * Interval of time after which the node tries to resend a data packet in case it has not chosen a parent yet
          */
 
-        NO_ROUTE_OFFSET=100,
+        NO_ROUTE_OFFSET=3,
 
         /*
          * Interval of time after which the node tries to resend a data packet after a routing loop has been detected
          * and (hopefully) fixed
          */
 
-        LOOP_DETECTED_OFFSET=100,
+        LOOP_DETECTED_OFFSET=3,
 
         /*
          * Period of the timer that triggers the sending of a new data packet
          */
 
-        SEND_PACKET_TIMER=50,
+        SEND_PACKET_TIMER=3,
         MIN_PAYLOAD=0, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
 };

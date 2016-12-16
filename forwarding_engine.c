@@ -30,6 +30,7 @@
 //#include "forwarding_engine.h"
 //#include "routing_engine.h"
 #include "application.h"
+#include "forwarding_engine.h"
 //#include "forwarding_engine.h"
 //#include "link_estimator.h"
 
@@ -173,13 +174,10 @@ bool forwarding_queue_enqueue(forwarding_queue_entry* entry,node_state* state){
 
                 /*
                  * There's enough space in the queue for at least one new element => insert the new element at position
-                 * determined by the "tail" variable => initialize the entry in the queue to the values of the given
-                 * entry
+                 * determined by the "tail" variable
                  */
 
-                state->forwarding_queue[state->forwarding_queue_tail]->data_packet=entry->data_packet;
-                state->forwarding_queue[state->forwarding_queue_tail]->is_local=entry->is_local;
-                state->forwarding_queue[state->forwarding_queue_tail]->retries=entry->retries;
+                state->forwarding_queue[state->forwarding_queue_tail]=entry;
 
                 /*
                  * Update the counter for the number of elements in the queue
@@ -563,6 +561,8 @@ void start_forwarding_engine(node_state* state){
                  */
 
                 wait_until(state->me.ID,state->lvt+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
+
+        //printf("FORWARDING ENGINE for %d initialized \n",state->me.ID);
 }
 
 /*
@@ -627,6 +627,8 @@ bool send_data_packet(node_state* state) {
 
         if ((!get_etx(&etx,state))) {
 
+                printf("No route for %d \n",state->me.ID);
+
                 /*
                  * The function "get_etx" returns false if the parent of the node is not valid => if this is the case,
                  * it means the route of the node is not valid => schedule a new forwarding attempt after an interval of
@@ -642,6 +644,8 @@ bool send_data_packet(node_state* state) {
 
                 return false;
         }
+
+        printf("ever here %d?\n",state->me.ID);
 
         /*
          * The node has a valid route (parent) => before sending the head packet, check that it's not duplicated.
@@ -674,6 +678,7 @@ bool send_data_packet(node_state* state) {
                  * of the queue may not be a duplicate
                  */
 
+                printf("%d sends data packet; retry\n",state->me.ID);
                 return true;
         }
 
@@ -732,6 +737,7 @@ bool send_data_packet(node_state* state) {
          * The data packet has been sent => no need to re-execute this function
          */
 
+        printf("%d sends data packet\n",state->me.ID);
         return false;
 }
 

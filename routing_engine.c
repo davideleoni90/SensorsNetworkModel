@@ -80,6 +80,8 @@ void start_routing_engine(node_state* state){
          */
 
         reset_beacon_interval(state);
+
+        //printf("ROUTING ENGINE for %d initialized \n",state->me.ID);
 }
 
 /*
@@ -812,7 +814,7 @@ void send_beacon(node_state* state){
                  * plus the 1-hop ETX to the parent
                  */
 
-                routing_frame->ETX=route->+get_one_hop_etx(route->parent,state->link_estimator_table);
+                routing_frame->ETX=route->etx+get_one_hop_etx(route->parent,state->link_estimator_table);
         }
 
         /*
@@ -1116,7 +1118,7 @@ node get_parent(node_state* state){
          * Ask the link estimator for coordinates of the parent
          */
 
-        parent.coordinates=get_parent_coordinates(parent.ID,state->link_estimator_table);
+        parent.coordinates=*get_parent_coordinates(parent.ID,state->link_estimator_table);
 
         /*
          * Return the parent
