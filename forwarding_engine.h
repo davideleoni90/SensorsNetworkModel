@@ -46,7 +46,7 @@ enum{
          * Period of the timer that triggers the sending of a new data packet
          */
 
-        SEND_PACKET_TIMER=3,
+        SEND_PACKET_TIMER=4,
         MIN_PAYLOAD=0, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
 };

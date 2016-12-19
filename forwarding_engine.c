@@ -265,7 +265,7 @@ void forwarding_queue_dequeue(node_state* state){
  * @forwarding_queue: the forwarding queue of the current node
  */
 
-bool forwarding_queue_lookup(ctp_data_packet_frame* data_frame,forwarding_queue_entry** forwarding_queue){
+bool forwarding_queue_lookup(ctp_data_packet_frame* data_frame,forwarding_queue_entry* forwarding_queue[]){
 
         /*
          * Index used to iterate through the packets in the cache
@@ -561,8 +561,6 @@ void start_forwarding_engine(node_state* state){
                  */
 
                 wait_until(state->me.ID,state->lvt+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
-
-        //printf("FORWARDING ENGINE for %d initialized \n",state->me.ID);
 }
 
 /*
@@ -627,8 +625,6 @@ bool send_data_packet(node_state* state) {
 
         if ((!get_etx(&etx,state))) {
 
-                printf("No route for %d \n",state->me.ID);
-
                 /*
                  * The function "get_etx" returns false if the parent of the node is not valid => if this is the case,
                  * it means the route of the node is not valid => schedule a new forwarding attempt after an interval of
@@ -644,8 +640,6 @@ bool send_data_packet(node_state* state) {
 
                 return false;
         }
-
-        printf("ever here %d?\n",state->me.ID);
 
         /*
          * The node has a valid route (parent) => before sending the head packet, check that it's not duplicated.
@@ -678,7 +672,6 @@ bool send_data_packet(node_state* state) {
                  * of the queue may not be a duplicate
                  */
 
-                printf("%d sends data packet; retry\n",state->me.ID);
                 return true;
         }
 
@@ -731,13 +724,12 @@ bool send_data_packet(node_state* state) {
          * acks received
          */
 
-        wait_until(state->me.ID,DATA_PACKET_ACK_OFFSET,CHECK_ACK_RECEIVED);
+        wait_until(state->me.ID,state->lvt+DATA_PACKET_ACK_OFFSET,CHECK_ACK_RECEIVED);
 
         /*
          * The data packet has been sent => no need to re-execute this function
          */
 
-        printf("%d sends data packet\n",state->me.ID);
         return false;
 }
 
@@ -860,7 +852,7 @@ void create_data_packet(node_state* state){
                  */
 
                 while(try_again)
-                        try_again=send_data_packet(state);
+                        try_again = send_data_packet(state);
         }
 }
 
@@ -892,13 +884,13 @@ bool receive_data_packet(void* message,node_state* state) {
          * Parse the buffer received to a data packet
          */
 
-        ctp_data_packet packet=*((ctp_data_packet*)message);
+        ctp_data_packet packet = *((ctp_data_packet *) message);
 
         /*
          * Read the THL from the forwarding frame of the data packet
          */
 
-        thl=packet.data_packet_frame.THL;
+        thl = packet.data_packet_frame.THL;
 
         /*
          * Increment the THL, beacause the packet is being forwarded by the current node
@@ -910,14 +902,14 @@ bool receive_data_packet(void* message,node_state* state) {
          * Update the dedicated field of the forwarding frame with the new value of thl
          */
 
-        packet.data_packet_frame.THL=thl;
+        packet.data_packet_frame.THL = thl;
 
         /*
          * Now check if this is a duplicated one => first check if it has been already transmitted, looking for it in
          * the output cache
          */
 
-        if(cache_lookup(&packet.data_packet_frame,state)<state->output_cache_count){
+        if (cache_lookup(&packet.data_packet_frame, state) < state->output_cache_count) {
 
                 /*
                  * The received message has been recently sent, so this is a duplicate => drop it
@@ -929,10 +921,12 @@ bool receive_data_packet(void* message,node_state* state) {
 
         /*
          * Then check if the packet has been already been inserted in the output queue, meaning that it will be soon
-         * forwarded
+         * forwarded.
+         * First check if the queue contains some element
          */
 
-        if(forwarding_queue_lookup(&packet.data_packet_frame,state->forwarding_queue)){
+        if (state->forwarding_queue_count){
+                if (forwarding_queue_lookup(&packet.data_packet_frame, state->forwarding_queue)) {
 
                 /*
                  * The received message is already in the output queue, so this is a duplicate => drop it
@@ -941,6 +935,7 @@ bool receive_data_packet(void* message,node_state* state) {
                 return false;
 
         }
+}
 
         /*
          * The packet received is not a duplicate => check if the current node is the root of the collection tree
@@ -954,7 +949,7 @@ bool receive_data_packet(void* message,node_state* state) {
                  * that are read in order to decide whether the simulation has come to and end or not
                  */
 
-                collected_data_packet(&packet);
+                collected_data_packet(&packet,state->me.ID);
         }
         else{
 
@@ -1077,6 +1072,7 @@ void forward_data_packet(ctp_data_packet* packet,node_state* state){
                          * sooner or later
                          */
 
+                        printf("node %d forwards packet from node %d\n",state->me.ID,entry->data_packet->phy_mac_overhead.src.ID);
                         send_data_packet(state);
                 }
 
@@ -1177,8 +1173,14 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
         else{
 
                 /*
-                 * Packet has been acknowledged by the recipient => first remove it from the output queue, so that next
-                 * transmission phase will send the next packet in the output queue
+                 * Packet has been acknowledged by the recipient => get a copy of the last sent packet
+                 */
+
+                forwarding_queue_entry head_entry_copy=*head_entry;
+
+
+                /* Then remove the message from the output queue, so that next transmission phase will send the next
+                 * packet in the output queue
                  */
 
                 forwarding_queue_dequeue(state);
@@ -1190,7 +1192,7 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                  * packet sent
                  */
 
-                check_if_ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,false,state->link_estimator_table);
+                check_if_ack_received(head_entry_copy.data_packet->phy_mac_overhead.dst.ID,false,state->link_estimator_table);
 
                 /*
                  * If the last packet sent was a forwarded one, insert in the outout cache in order to avoid duplicates

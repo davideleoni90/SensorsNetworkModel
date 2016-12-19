@@ -7,6 +7,7 @@
 typedef struct _node node;
 typedef struct _ctp_routing_frame ctp_routing_frame;
 typedef struct _node_state node_state;
+typedef struct _route_info route_info;
 //#include "application.h"
 
 /*
@@ -14,7 +15,7 @@ typedef struct _node_state node_state;
  */
 
 enum{
-        UPDATE_ROUTE_TIMER=8192, // After such interval of time, the route of the node is (re)computed
+        UPDATE_ROUTE_TIMER=2, // After such interval of time, the route of the node is (re)computed
         INVALID_ADDRESS=0xFFFF, // Value used for the ID of neighbor that is not valid
         ROUTING_TABLE_SIZE=10, // Max number of entries in the routing table
 
@@ -31,8 +32,8 @@ enum{
          */
 
         PARENT_SWITCH_THRESHOLD=15,
-        MIN_BEACONS_SEND_INTERVAL=128, // Minimum value (max frequency) for the interval between two beacons sent
-        MAX_BEACONS_SEND_INTERVAL=512000 // Maximum value (min frequency) for the interval between two beacons sent
+        MIN_BEACONS_SEND_INTERVAL=3, // Minimum value (max frequency) for the interval between two beacons sent
+        MAX_BEACONS_SEND_INTERVAL=7 // Maximum value (min frequency) for the interval between two beacons sent
 };
 
 /* ROUTING ENGINE API */

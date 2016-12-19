@@ -28,12 +28,18 @@
 
 /*
  * Method to initialize a variable describing a path from one node to the root: simply sets all the fields to  their
- * default value
+ * default value; if the node is the root of the collection tree, set the parent field to its onw ID
+ *
+ * @state: pointer to the object representing the current state of the node
  */
 
-void init_route_info(route_info * route) {
-        route->parent= INVALID_ADDRESS; // ID of the parent of the node associated to the entry
-        route->etx = 0; // multi-hop etx of the node
+void init_route_info(node_state* state) {
+        if(state->root)
+                state->route.parent=state->me.ID;
+        else
+                state->route.parent= INVALID_ADDRESS;
+        state->route.etx = 0;
+        state->route.congested=false;
 }
 
 /*
@@ -65,14 +71,17 @@ void start_routing_engine(node_state* state){
          * Initialize the route from this node to the root of the collection tree
          */
 
-        init_route_info(&state->route);
+        init_route_info(state);
 
         /*
          * Start the periodic timer with interval UPDATE_ROUTE_TIMER: every time is fired, the route is updated.
          * The simulator is in charge of re-setting the timer every time it is fired
+         * The route of the root node is set when the CTP stack is initialized and does not obviously changes anymore
+         * => the root node it not notified this event
          */
 
-        wait_until(state->me.ID,state->lvt+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
+        if(!state->root)
+                wait_until(state->me.ID,state->lvt+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
 
         /*
          * Start the periodic timer for sending beacons: the interval is BEACON_MIN_INTERVAL at first, and is increased
@@ -80,8 +89,6 @@ void start_routing_engine(node_state* state){
          */
 
         reset_beacon_interval(state);
-
-        //printf("ROUTING ENGINE for %d initialized \n",state->me.ID);
 }
 
 /*
@@ -413,6 +420,13 @@ void update_route(node_state* state){
         unsigned short current_etx;
 
         /*
+         * ETX of this node before updating the route; is the ETX of the path that passes throug the actual parent
+         * (if any)
+         */
+
+        unsigned short actual_etx;
+
+        /*
          * 1-hop ETX of the current entry of the routing table, used while scanning
          */
 
@@ -433,11 +447,14 @@ void update_route(node_state* state){
         best_entry=NULL;
 
         /*
-         * Initially set the minimum and current etx to infinite (INFINITE_ETX)
+         * Initially set the minimum and actual etx to infinite (INFINITE_ETX)
+         *
+         * NOTE if the node has not chosen any parent yet, "actual_ETX" will be equal to INFINITE_ETX at the end of the
+         * iteration and a parent will be chosen
          */
 
         min_etx=INFINITE_ETX;
-        current_etx=INFINITE_ETX;
+        actual_etx=INFINITE_ETX;
 
         /*
          * Get the route of the node from its state object
@@ -484,6 +501,12 @@ void update_route(node_state* state){
                  */
 
                 if(current_entry->neighbor==route->parent){
+
+                        /*
+                         * Set the value of the actual ETX to the one of the path through the current parent
+                         */
+
+                        actual_etx=current_etx;
 
                         /*
                          * In case the node analyzed is the actual parent of the node, update the corresponding entry
@@ -552,7 +575,7 @@ void update_route(node_state* state){
 
                 /*
                  * Check if the conditions to change the parent hold:
-                 * 1 - there's no parent yet (currentETX=INFINITE_ETX)
+                 * 1 - there's no parent yet (actual_etx==INFINITE_ETX)
                  * OR
                  * 2 - the current route is congested AND the new parent is not descendant of the actual parent
                  * OR
@@ -560,8 +583,8 @@ void update_route(node_state* state){
                  *     less than the route passing through the actual parent
                  */
 
-                if(current_etx==INFINITE_ETX || (route->congested && (min_etx<(route->etx+10))) ||
-                   (min_etx+PARENT_SWITCH_THRESHOLD<current_etx)){
+                if(actual_etx==INFINITE_ETX || (route->congested && (min_etx<(route->etx+10))) ||
+                   (min_etx+PARENT_SWITCH_THRESHOLD<actual_etx)){
 
                         /*
                          * Pointer to the link estimator table of the node
@@ -930,7 +953,7 @@ void neighbor_evicted(unsigned int address,node_state* state){
          */
 
         if(address==state->route.parent){
-                init_route_info(&state->route);
+                init_route_info(state);
                 update_route(state);
         }
 }

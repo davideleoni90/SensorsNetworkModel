@@ -41,7 +41,7 @@ enum{
          * Time for a message to be delivered to its recipient
          */
 
-        MESSAGE_DELIVERY_TIME=4,
+        MESSAGE_DELIVERY_TIME=1,
 
         /*
          * Lower bound of data packets received by the root for the simulation to stop
@@ -336,7 +336,7 @@ typedef struct _node_state{
 } node_state;
 
 void wait_until(unsigned int me,simtime_t timestamp,unsigned int type);
-void collected_data_packet(ctp_data_packet* packet);
+void collected_data_packet(ctp_data_packet* packet, unsigned int i);
 void broadcast_event(ctp_routing_packet* beacon,simtime_t time);
 void unicast_event(ctp_data_packet* packet,simtime_t time);
 

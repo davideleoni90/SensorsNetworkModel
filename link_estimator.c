@@ -17,6 +17,7 @@
  * when a node receives a beacon, the information contained are used to update the link estimator table.
  */
 
+#include <limits.h>
 #include "link_estimator.h"
 #include "application.h"
 
@@ -406,6 +407,33 @@ unsigned char find_estimator_free_entry(link_estimator_table_entry* link_estimat
  */
 
 /*
+ * INITIALIZE NEIGHBORS TABLE
+ *
+ * Set the address field of the entries in the neighbor table to "UINT_MAX", otherwise there will always be an entry dedicated
+ * to node 0 even before it sends any beacon; also set the "option" flag to 0
+ *
+ * @link_estimator_table: the link estimator table
+ */
+
+void init_link_estimator_table(link_estimator_table_entry* link_estimator_table){
+
+        /*
+         * Index variable used to iterate through entries in the table
+         */
+
+        int i=0;
+
+        /*
+         * Set all the entries
+         */
+
+        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
+                link_estimator_table[i].flags=0;
+                link_estimator_table[i].neighbor.ID=UINT_MAX-1;
+        }
+}
+
+/*
  * INSERT NEIGHBOR
  *
  * Function called by the ROUTING ENGINE when a beacon from the root of the collection tree is received: by calling this
@@ -495,9 +523,8 @@ void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_ta
  * @address: the ID of the neighbor whose 1-hop ETX is queried
  * @link_estimator_table: pointer to the link estimator table of the node
  *
- * Returns the 1-hop ETX of the neighbor; if the ID doesn't match any entry in the estimator table; in case the given
- * address does not match any entry, VERY_LARGE_ETX_VALUE is returned as error code and the same holds if the entry has
- * not the MATURE flag set
+ * Returns the 1-hop ETX of the neighbor; in case the given address does not match any entry, VERY_LARGE_ETX_VALUE is
+ * returned as error code and the same holds if the entry has not the MATURE flag set
  */
 
 unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* link_estimator_table){
@@ -834,7 +861,6 @@ void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequenc
          * new broadcast event
          */
 
-        printf("%d sends beacon\n",me.ID);
         broadcast_event(beacon,now);
 }
 
@@ -1108,6 +1134,7 @@ void update_ingoing_quality(unsigned int neighbor,link_estimator_table_entry* li
 
                                 update_ETX(entry,entry->ingoing_quality);
                         }
+                        break;
                 }
         }
 }
@@ -1195,13 +1222,13 @@ void update_neighbor_entry(unsigned char index, unsigned char seq,link_estimator
                 /*
                  * The number of lost beacons from the neighbor is below the limit.
                  * If the number of beacons received from the neighbor since the last update or the number of lost
-                 * beacons are bigger than or equal to BLQ_PKT_WINDOW, the ETX of the neighbor has to be recomputed
+                 * beacons is bigger than or equal to BLQ_PKT_WINDOW, the ETX of the neighbor has to be recomputed
                  */
 
                 if((link_estimator_table[index].beacons_missed+link_estimator_table[index].beacons_received>=BLQ_PKT_WINDOW)
-                   || (lost_beacons>=BLQ_PKT_WINDOW))
-                        update_ingoing_quality(link_estimator_table[index].neighbor.ID,link_estimator_table);
-
+                   || (lost_beacons>=BLQ_PKT_WINDOW)) {
+                        update_ingoing_quality(link_estimator_table[index].neighbor.ID, link_estimator_table);
+                }
         }
 }
 

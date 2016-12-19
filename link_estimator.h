@@ -163,5 +163,6 @@ bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimato
 void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_table);
 node_coordinates* get_parent_coordinates(unsigned int parent,link_estimator_table_entry* link_estimator_table);
 void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
+void init_link_estimator_table(link_estimator_table_entry* link_estimator_table);
 
 #endif

@@ -8,6 +8,7 @@
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
 unsigned char collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
+unsigned int collected_packets_list[3];
 FILE* file; // Pointer to the file object associated to the configuration file
 
 /*
@@ -172,17 +173,21 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         /* SET CTP STACK - start */
 
                         /*
-                         * If this is the root node, set the corresponding flag in the state object
+                         * If this is the root node, set the corresponding flag in the state object and also initialize
+                         * the route, once for all
                          */
 
-                        if(me==ctp_root)
-                                state->root=true;
+                        if(me==ctp_root) {
+                                state->root = true;
+                        }
 
                         /*
-                         * Initialize the LINK ESTIMATOR => set the sequence number of the beacons to 0
+                         * Initialize the LINK ESTIMATOR => set the sequence number of the beacons to 0 and initialize
+                         * entries of the link estimator table
                          */
 
                         state->beacon_sequence_number=0;
+                        init_link_estimator_table(state->link_estimator_table);
 
                         /*
                          * Initialize the ROUTING ENGINE
@@ -202,8 +207,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case UPDATE_ROUTE_TIMER_FIRED:
 
-                        //printf("UPDATING ROUTE for %d initialized \n",state->me.ID);
-
                         /*
                          * It's time for the ROUTING ENGINE to update the route of the node => invoke the dedicated
                          * function.
@@ -221,11 +224,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case SEND_BEACONS_TIMER_FIRED:
 
-                        //printf("SEND_BEACONS_TIMER_FIRED for %d initialized \n",state->me.ID);
-
                         /*
                          * It's time for the ROUTING ENGINE to send a beacon to its neighbors => before doing this,
-                         * update the route, so that information reported in the beacon will not be obsolete
+                         * update the route, so that information repSEND_BEACONS_TIMER_FIREDorted in the beacon will not be obsolete
                          */
 
                         update_route(state);
@@ -247,8 +248,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case SEND_PACKET_TIMER_FIRED:
 
-                        //printf("SEND_PACKET_TIMER_FIRED for %d initialized \n",state->me.ID);
-
                         /*
                          * It's time for the FORWARDING ENGINE to send a data packet to the root note
                          */
@@ -265,8 +264,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case RETRANSMITT_DATA_PACKET:
 
-                        //printf("RETRANSMITT_DATA_PACKET for %d initialized \n",state->me.ID);
-
                         /*
                          * This event is delivered to the node in order for it to transmit again the last data packet
                          * sent: this is due to the fact that the packet has been acknowledged by the recipient
@@ -277,8 +274,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case SET_BEACONS_TIMER:
 
-                        //printf("SET_BEACONS_TIMER for %d initialized \n",state->me.ID);
-
                         /*
                          * This event is processed when the interval associated to the timer for beacons has to be
                          * updated
@@ -288,8 +283,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         break;
 
                 case BEACON_RECEIVED:
-
-                        //printf("BEACON_RECEIVED for %d initialized \n",state->me.ID);
 
                         /*
                          * A beacon has been received => possibly update the neighbor and the routing table; the
@@ -302,8 +295,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                 case DATA_PACKET_RECEIVED:
 
-                        //printf("DATA_PACKET_RECEIVED for %d initialized \n",state->me.ID);
-
                         /*
                          * The node has received a data packet => let the FORWARDING ENGINE process it
                          */
@@ -312,8 +303,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         break;
 
                 case CHECK_ACK_RECEIVED:
-
-                        //printf("CHECK_ACK_RECEIVED for %d initialized \n",state->me.ID);
 
                         /*
                          * When a node sends or forwards a data packet, this is not removed from the output queue until
@@ -329,7 +318,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         break;
 
                 default:
-                        collected_packets++;
+                        printf("Events not handled\n");
 
         }
 }
@@ -356,18 +345,22 @@ bool OnGVT(unsigned int me, void*snapshot) {
          * If the current node is the root of the collection tree, check the number of data packets received
          */
 
-        /*if(root){
-                if(collected_packets>=COLLECTED_DATA_PACKETS_GOAL)
-                        return true;
-        }*/
-
-        /*
-         * The node is not the root or is the root but the number of data packets collected is not yet sufficient to
-         * stop the simulation
-         */
-
-        if(collected_packets>0)
+        if(((node_state*)snapshot)->root){
+                int i=0;
+                for(i=0;i<n_prc_tot;i++) {
+                        if (collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL)
+                                return false;
+                }
                 return true;
+
+        }
+        else{
+                /*
+                 * Other nodes are always ok with stopping simulation
+                 */
+
+                return true;
+        }
 }
 
 /* SIMULATION API - start */
@@ -449,7 +442,6 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
 
 
                 if (message_received(src.coordinates, recipient)) {
-                        printf("Node %d can receive message of %d\n",src.ID,i);
                         ScheduleNewEvent(i, time + MESSAGE_DELIVERY_TIME, BEACON_RECEIVED, beacon,
                                          sizeof(ctp_routing_packet));
                 }
@@ -497,7 +489,6 @@ void unicast_event(ctp_data_packet* packet,simtime_t time) {
          */
 
         if (message_received(recipient, src.coordinates)) {
-                printf("Node %d can receive message of %d\n",src.ID,dst.ID);
                 ScheduleNewEvent(dst.ID, time + MESSAGE_DELIVERY_TIME, DATA_PACKET_RECEIVED, packet,
                                  sizeof(ctp_data_packet));
         }
@@ -710,7 +701,6 @@ bool is_ack_received(node_state* state){
          */
 
         bool ack_received=message_received(state->me.coordinates,recipient);
-        printf("Node %d can receive message of %d? %d\n",state->me.ID,packet->phy_mac_overhead.dst.ID,ack_received);
 
         /*
          * Tell the result to the FORWARDING ENGINE: it is in charge of deciding how to proceed
@@ -843,8 +833,10 @@ bool message_received(node_coordinates a,node_coordinates b){
 
 }
 
-void collected_data_packet(ctp_data_packet* packet){
+void collected_data_packet(ctp_data_packet* packet, unsigned int i){
+        printf("Root received packet with payload %d from node %u\n",packet->payload,packet->phy_mac_overhead.src.ID);
         collected_packets++;
+        collected_packets_list[i]+=1;
 }
 
 /* SIMULATION FUNCTIONS - end */
