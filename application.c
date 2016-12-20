@@ -3,6 +3,7 @@
 #include <string.h>
 #include <ROOT-Sim.h>
 #include "application.h"
+#include "forwarding_engine.h"
 #include <math.h>
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
@@ -167,6 +168,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         this_node.ID=me;
                         this_node.coordinates=nodes_list[me];
                         state->me=this_node;
+
+                        /*
+                         * Set the state of the node to RUNNING
+                         */
+
+                        state->state=RUNNING;
 
                         /* GET PARAMETERS OF THE SIMULATION - end */
 
@@ -684,6 +691,9 @@ void parse_configuration_file(const char* path){
 
 bool is_ack_received(node_state* state){
 
+        printf("checking if node %d received ack for packet with payload %d\n", state->me.ID,
+               state->forwarding_queue[state->forwarding_queue_head]->data_packet->payload);
+
         /*
          * First get the last packet sent by the node: it's the on that occupies the head of the forwarding queue
          */
@@ -834,7 +844,7 @@ bool message_received(node_coordinates a,node_coordinates b){
 }
 
 void collected_data_packet(ctp_data_packet* packet, unsigned int i){
-        printf("Root received packet with payload %d from node %u\n",packet->payload,packet->phy_mac_overhead.src.ID);
+        printf("Root received packet with payload %d from node %u\n",packet->payload,packet->data_packet_frame.origin);
         collected_packets++;
         collected_packets_list[i]+=1;
 }

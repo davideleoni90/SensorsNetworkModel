@@ -46,18 +46,9 @@ enum{
          * Period of the timer that triggers the sending of a new data packet
          */
 
-        SEND_PACKET_TIMER=4,
+        SEND_PACKET_TIMER=2,
         MIN_PAYLOAD=0, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
-};
-
-/*
- * FORWARDING ENGINE STATE FLAGS
- */
-
-enum{
-        SENDING=0x10, // Busy sending a data packet => wait before send another packet
-        ACK_PENDING=0x8 // Waiting for the last sent data packet to be acknowledged
 };
 
 /*

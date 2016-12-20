@@ -199,6 +199,12 @@ bool forwarding_queue_enqueue(forwarding_queue_entry* entry,node_state* state){
 
                 if(state->forwarding_queue_tail==FORWARDING_QUEUE_DEPTH)
                         state->forwarding_queue_tail=0;
+
+                /*
+                 * Packet enqueued => return true
+                 */
+
+                return true;
         }
 
         /*
@@ -263,9 +269,11 @@ void forwarding_queue_dequeue(node_state* state){
  *
  * @data_frame: the data frame of the packet to be looked up
  * @forwarding_queue: the forwarding queue of the current node
+ * @count: number of queued packets
  */
 
-bool forwarding_queue_lookup(ctp_data_packet_frame* data_frame,forwarding_queue_entry* forwarding_queue[]){
+bool forwarding_queue_lookup(ctp_data_packet_frame* data_frame,forwarding_queue_entry* forwarding_queue[],
+                             unsigned char count){
 
         /*
          * Index used to iterate through the packets in the cache
@@ -277,7 +285,7 @@ bool forwarding_queue_lookup(ctp_data_packet_frame* data_frame,forwarding_queue_
          * Scan the output queue until an item matching the searched packet is found
          */
 
-        for(i=0;i<FORWARDING_QUEUE_DEPTH;i++){
+        for(i=0;i<count;i++){
 
                 /*
                  * The data frame of the element of the output queue analyzed
@@ -608,7 +616,7 @@ bool send_data_packet(node_state* state) {
          * Check if there at least one packet to forward; when the output queue is empty, its "counter" is set to 0
          */
 
-        if (!state->forwarding_queue_count) {
+        if (!state->forwarding_queue_count){
 
                 /*
                  * Output queue is empty => return false because a further invocation will be of no help
@@ -647,6 +655,8 @@ bool send_data_packet(node_state* state) {
          */
 
         first_entry=state->forwarding_queue[state->forwarding_queue_head];
+        printf("Last enqueued packet for node %d has payload:%d\n",state->me.ID,first_entry->data_packet->payload);
+        printf("node 1 head:%d tail:%d\n",state->forwarding_queue_head,state->forwarding_queue_tail);
 
         /*
          * Perform the check on the packet corresponding to the selected entry of the queue
@@ -659,6 +669,7 @@ bool send_data_packet(node_state* state) {
                  * packet from the output queue...
                  */
 
+                printf("dequeing packet with payload %d\n",first_entry->data_packet->payload);
                 forwarding_queue_dequeue(state);
 
                 /*
@@ -715,7 +726,14 @@ bool send_data_packet(node_state* state) {
          * parent node reported in the physical layer frame of the packet
          */
 
+        printf("node %d now sending packet with payload %d\n",state->me.ID,first_entry->data_packet->payload);
         unicast_event(first_entry->data_packet,state->lvt);
+
+        /*
+         * The node is now waiting for the last data packet sent to be acknowledged => set the corresponding flag
+         */
+
+        state->state|=ACK_PENDING;
 
         /*
          * Schedule a new event after time equal to the DATA_PACKET_ACK_OFFSET, destined to the current node, in order
@@ -743,6 +761,9 @@ bool send_data_packet(node_state* state) {
  * a new packet, forward the one that currently is at the head of the queue.
  * This function can't be invoked by the root node, because this only collects data from the collection tree
  *
+ * NOTE a node sends one data packet at a time => after the last created data packet has been acknowledged, a new packet
+ * can be created. In other words, there's a data packet created by the node at a time in the forwarding queue
+ *
  * @state: pointer to the object representing the current state of the node
  */
 
@@ -752,107 +773,128 @@ void create_data_packet(node_state* state){
          * Pointer to the data frame of the next data packet to send
          */
 
-        ctp_data_packet_frame* data_frame;
+        ctp_data_packet_frame *data_frame;
 
-        /*
-         * Set the payload of the data packet to be sent
-         */
-
-        state->data_packet.payload=RandomRange(MIN_PAYLOAD,MAX_PAYLOAD);
-
-        /*
-         * Get the data frame from the data packet to be sent
-         */
-
-        data_frame=&state->data_packet.data_packet_frame;
-
-        /*
-         * Set the fields of the data frame related to forwarding.
-         * Start with origin, which has to be set to the ID of the current node
-         */
-
-        data_frame->origin=state->me.ID;
-
-        /*
-         * Then set the sequence number
-         */
-
-        data_frame->seqNo=state->data_packet_seqNo;
-
-        /*
-         * Update the value of the sequence number for the next data packet
-         */
-
-        state->data_packet_seqNo+=1;
-
-        /*
-         * Finally set the THL (Time Has Lived) field to 0, because the packet has been just created
-         */
-
-        data_frame->THL=0;
-
-        /*
-         * Check if there's at least one free entry in output queue to send the new packet => if this, is the case, the
-         * variable "forwarding_queue_count" is less than the depth of the queue
-         */
-
-        if(state->forwarding_queue_count<FORWARDING_QUEUE_DEPTH) {
+        if(!(state->state&SENDING)) {
 
                 /*
-                 * The function that is in charge of actually sending the packet, works as follows;
-                 * 1-gets the head entry in the forwarding queue
-                 * 2-extracts a packet from it
-                 * 3-sends it to the parent node.
-                 *
-                 * If the head of the queue is a duplicate packet, it is removed => in this case the function returns
-                 * true, meaning that it has to be invoked again to send the next packet in the queue => the variable
-                 * below is set to true if a new sending attempt has to be made
+                 * Set the payload of the data packet to be sent
                  */
 
-                bool try_again;
+                state->data_packet.payload = RandomRange(MIN_PAYLOAD, MAX_PAYLOAD);
+                printf("node %d adding packet with payload %d\n", state->me.ID, state->data_packet.payload);
 
                 /*
-                 * There's free space in the forwarding queue => initialize the entry for the packet to be queued up.
-                 * Initialize the dedicated pointer to the data packet the entry corresponds to
+                 * Get the data frame from the data packet to be sent
                  */
 
-                state->local_entry.data_packet = &state->data_packet;
+                data_frame = &state->data_packet.data_packet_frame;
 
                 /*
-                 * Set the number of transmission attempt to its maximum value: every time a transmission fails, this
-                 * counter is decreased and when it's equal to 0 the packet is dropped
+                 * Set the fields of the data frame related to forwarding.
+                 * Start with origin, which has to be set to the ID of the current node
                  */
 
-                state->local_entry.retries = MAX_RETRIES;
+                data_frame->origin = state->me.ID;
 
                 /*
-                 * Set the flag indicating that this node created the packet to be sent
+                 * Then set the sequence number
                  */
 
-                state->local_entry.is_local=true;
+                data_frame->seqNo = state->data_packet_seqNo;
 
                 /*
-                 * Insert the entry for the packet to be sent in the forwarding queue: we have already seen that the
-                 * queue is not full, so we don't further check the return value of the following call
+                 * Update the value of the sequence number for the next data packet
                  */
 
-                forwarding_queue_enqueue(&state->local_entry,state);
+                state->data_packet_seqNo += 1;
 
                 /*
-                 * Now that the packet has been successfully queued up, it's time to send the data packet. Call the
-                 * function the first time
+                 * Finally set the THL (Time Has Lived) field to 0, because the packet has been just created
                  */
 
-                try_again=send_data_packet(state);
+                data_frame->THL = 0;
 
                 /*
-                 * If "try_again" is "true", it means that a new sending attempt is necessary => keep trying until a
-                 * valid (not duplicate) packet is found in the output queue or this is empty (in either case,"try_again"
-                 * is set to "false" and the loop ends)
+                 * Check if there's at least one free entry in output queue to send the new packet => if this, is the case, the
+                 * variable "forwarding_queue_count" is less than the depth of the queue
                  */
 
-                while(try_again)
+                if (state->forwarding_queue_count < FORWARDING_QUEUE_DEPTH) {
+
+                        /*
+                         * The function that is in charge of actually sending the packet, works as follows;
+                         * 1-gets the head entry in the forwarding queue
+                         * 2-extracts a packet from it
+                         * 3-sends it to the parent node.
+                         *
+                         * If the head of the queue is a duplicate packet, it is removed => in this case the function returns
+                         * true, meaning that it has to be invoked again to send the next packet in the queue => the variable
+                         * below is set to true if a new sending attempt has to be made
+                         */
+
+                        bool try_again;
+
+                        /*
+                         * There's free space in the forwarding queue => initialize the entry for the packet to be queued up.
+                         * Initialize the dedicated pointer to the data packet the entry corresponds to
+                         */
+
+                        state->local_entry.data_packet = &state->data_packet;
+
+                        /*
+                         * Set the number of transmission attempt to its maximum value: every time a transmission fails, this
+                         * counter is decreased and when it's equal to 0 the packet is dropped
+                         */
+
+                        state->local_entry.retries = MAX_RETRIES;
+
+                        /*
+                         * Set the flag indicating that this node created the packet to be sent
+                         */
+
+                        state->local_entry.is_local = true;
+
+                        /*
+                         * Check if the last data packet created has been successfully send: if not, wait
+                         */
+
+                        // if(!(state->state&SENDING)) {
+
+                        /*
+                         * Insert the entry for the packet to be sent in the forwarding queue: we have already seen that the
+                         * queue is not full, so we don't further check the return value of the following call
+                         */
+
+                        forwarding_queue_enqueue(&state->local_entry, state);
+
+                        /*
+                         * Set the state of the node to SENDING, because the packet it created is now in the forwarding
+                         * queue
+                         */
+
+                        state->state |= SENDING;
+                        //}
+
+                        /*
+                         * Now that the packet has been successfully queued up, it's time to send the data packet. Call the
+                         * function the first time
+                         */
+
                         try_again = send_data_packet(state);
+
+                        /*
+                         * If "try_again" is "true", it means that a new sending attempt is necessary => keep trying until a
+                         * valid (not duplicate) packet is found in the output queue or this is empty (in either case,"try_again"
+                         * is set to "false" and the loop ends)
+                         */
+
+                        while (try_again)
+                                try_again = send_data_packet(state);
+                }
+        }
+        else{
+                send_data_packet(state);
         }
 }
 
@@ -926,16 +968,18 @@ bool receive_data_packet(void* message,node_state* state) {
          */
 
         if (state->forwarding_queue_count){
-                if (forwarding_queue_lookup(&packet.data_packet_frame, state->forwarding_queue)) {
+                printf("Check if alreay sent\n");
+                if (forwarding_queue_lookup(&packet.data_packet_frame, state->forwarding_queue,
+                                            state->forwarding_queue_count)) {
 
-                /*
-                 * The received message is already in the output queue, so this is a duplicate => drop it
-                 */
+                        /*
+                         * The received message is already in the output queue, so this is a duplicate => drop it
+                         */
 
-                return false;
+                        return false;
 
+                }
         }
-}
 
         /*
          * The packet received is not a duplicate => check if the current node is the root of the collection tree
@@ -1155,7 +1199,14 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                          * the forwarding queue, so that the next packet will be sent in the next forwarding phase
                          */
 
+                        printf("receive ack1 dequeing packet with payload %d\n",head_entry->data_packet->payload);
                         forwarding_queue_dequeue(state);
+
+                        /*
+                         * If the data packet was created by the node, clear the SENDING flag
+                         */
+
+                        state->state&=~SENDING;
 
                         /*
                          * Return the entry of the last sent data packet to the forwarding pool
@@ -1183,6 +1234,7 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                  * packet in the output queue
                  */
 
+                printf("receive ack2 dequeing packet with payload %d\n",head_entry->data_packet->payload);
                 forwarding_queue_dequeue(state);
 
                 /*
@@ -1195,11 +1247,19 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                 check_if_ack_received(head_entry_copy.data_packet->phy_mac_overhead.dst.ID,false,state->link_estimator_table);
 
                 /*
-                 * If the last packet sent was a forwarded one, insert in the outout cache in order to avoid duplicates
+                 * If the last packet sent was a forwarded one, insert in the output cache in order to avoid duplicates
                  */
 
                 if(!head_entry->is_local)
                         cache_enqueue(&head_entry->data_packet->data_packet_frame,state);
+                else{
+
+                        /*
+                         * The last packet created by the node has been successfully sent => clear the SENDING flag
+                         */
+
+                        state->state&=~SENDING;
+                }
 
                 /*
                  * Return the entry of the last sent data packet to the forwarding pool

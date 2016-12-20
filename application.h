@@ -29,6 +29,18 @@ enum{
 };
 
 /*
+ * STATE FLAGS
+ *
+ * Flags that indicate the state of the node
+ */
+
+enum{
+        SENDING=0x1, // Busy sending a data packet => wait before send another packet
+        ACK_PENDING=0x2, // Waiting for the last sent data packet to be acknowledged
+        RUNNING=0x4 // The node is running => has not failed (yet)
+};
+
+/*
  * CTP CONSTANTS
  */
 
@@ -332,6 +344,7 @@ typedef struct _node_state{
 
         bool root; // Boolean variable that is set to true if the node is the designated root of the collection tree
         node me; // ID and coordinates of this node (logical process)
+        unsigned char state; // Bit-wise OR combination of flags indicating the state of the node
         simtime_t lvt; // Value of the Local Virtual Time
 } node_state;
 
