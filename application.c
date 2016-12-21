@@ -9,7 +9,7 @@
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
 unsigned char collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
-unsigned int collected_packets_list[3];
+unsigned int collected_packets_list[5];
 FILE* file; // Pointer to the file object associated to the configuration file
 
 /*
@@ -24,7 +24,7 @@ unsigned int ctp_root=0;
 
 void parse_configuration_file(const char* path);
 void start_routing_engine(node_state* state);
-bool is_ack_received(node_state* state);
+void is_ack_received(node_state* state);
 bool message_received(node_coordinates a,node_coordinates b);
 
 /*
@@ -256,10 +256,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                 case SEND_PACKET_TIMER_FIRED:
 
                         /*
-                         * It's time for the FORWARDING ENGINE to send a data packet to the root note
+                         * If the node is waiting for a packet to be acknowledged, keep waiting, otherwise create a new
+                         * packet and send it to the root node
                          */
 
-                        create_data_packet(state);
+                        if(!(state->state&ACK_PENDING))
+                                create_data_packet(state);
 
                         /*
                          * The time simulated through this event is periodic => schedule this event after the same amount
@@ -273,7 +275,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         /*
                          * This event is delivered to the node in order for it to transmit again the last data packet
-                         * sent: this is due to the fact that the packet has been acknowledged by the recipient
+                         * sent: this is due to the fact that the packet has been acknowledged by the recipient.
                          */
 
                         send_data_packet(state);
@@ -353,12 +355,18 @@ bool OnGVT(unsigned int me, void*snapshot) {
          */
 
         if(((node_state*)snapshot)->root){
+                if(collected_packets>=50)
+                        return true;
                 int i=0;
-                for(i=0;i<n_prc_tot;i++) {
-                        if (collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL)
-                                return false;
+                bool terminate=true;
+                for(i=1;i<n_prc_tot;i++) {
+                        //printf("packets from %d:%d\n",i,collected_packets_list[i]);
+                        if ((collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL) && i!=4)
+                                terminate=false;
+                        else{}
+                                //printf("%d ok\n",i);
                 }
-                return true;
+                return terminate;
 
         }
         else{
@@ -684,15 +692,12 @@ void parse_configuration_file(const char* path){
  * for the last data packet it sent and returns the result to the FORWARDING ENGINE
  *
  * @state: pointer to the object representing the current state of the node
- *
- * Returns the bool value indicating whether the message has been received by the recipient: if it is received, the
- * recipient receives the corresponding event
  */
 
-bool is_ack_received(node_state* state){
+void is_ack_received(node_state* state){
 
-        printf("checking if node %d received ack for packet with payload %d\n", state->me.ID,
-               state->forwarding_queue[state->forwarding_queue_head]->data_packet->payload);
+        //printf("checking if node %d received ack for packet with payload %d\n", state->me.ID,
+               //state->forwarding_queue[state->forwarding_queue_head]->data_packet->payload);
 
         /*
          * First get the last packet sent by the node: it's the on that occupies the head of the forwarding queue
@@ -717,12 +722,6 @@ bool is_ack_received(node_state* state){
          */
 
         receive_ack(ack_received,state);
-
-        /*
-         * Return the response from the simulator
-         */
-
-        return ack_received;
 }
 
 /*
@@ -843,10 +842,11 @@ bool message_received(node_coordinates a,node_coordinates b){
 
 }
 
-void collected_data_packet(ctp_data_packet* packet, unsigned int i){
+void collected_data_packet(ctp_data_packet* packet){
         printf("Root received packet with payload %d from node %u\n",packet->payload,packet->data_packet_frame.origin);
         collected_packets++;
-        collected_packets_list[i]+=1;
+        if(packet->data_packet_frame.origin)
+                collected_packets_list[packet->data_packet_frame.origin-1]+=1;
 }
 
 /* SIMULATION FUNCTIONS - end */

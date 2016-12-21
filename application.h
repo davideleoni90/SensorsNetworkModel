@@ -337,8 +337,6 @@ typedef struct _node_state{
         forwarding_queue_entry local_entry;
 
         unsigned char data_packet_seqNo; // Sequence number of the data packet to be sent (initially 0)
-        unsigned char forwarding_engine_state; // Combination of flags indicating the state of the FORWARDING ENGINE; at
-        // first is 0
 
         /* FORWARDING ENGINE FIELDS - end */
 
@@ -349,7 +347,7 @@ typedef struct _node_state{
 } node_state;
 
 void wait_until(unsigned int me,simtime_t timestamp,unsigned int type);
-void collected_data_packet(ctp_data_packet* packet, unsigned int i);
+void collected_data_packet(ctp_data_packet* packet);
 void broadcast_event(ctp_routing_packet* beacon,simtime_t time);
 void unicast_event(ctp_data_packet* packet,simtime_t time);
 

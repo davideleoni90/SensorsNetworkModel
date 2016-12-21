@@ -29,6 +29,7 @@
 
 //#include "forwarding_engine.h"
 //#include "routing_engine.h"
+#include <limits.h>
 #include "application.h"
 #include "forwarding_engine.h"
 //#include "forwarding_engine.h"
@@ -46,53 +47,49 @@ void cache_remove(unsigned char offset,node_state* state);
  * Get an entry from the pool; it's the one at the position indicated by the variable "forwarding_pool_index"
  *
  * @state: pointer to the object representing the current state of the node
+ *
+ * Returns a pointer to the entry of the pool, NULL if the pool is empty
  */
 
 forwarding_queue_entry* forwarding_pool_get(node_state* state){
 
         /*
-         * An entry can be obtained only if the pool is not empty => check the counter
+         * If teh pool is empty, return NULL
          */
 
-        if(state->forwarding_pool_count){
-
-                /*
-                 * The return value: the entry corresponding to element "index" of the pool
-                 */
-
-                forwarding_queue_entry* entry=&state->forwarding_pool[state->forwarding_pool_index];
-
-                /*
-                 * Set the "index" variable to the next available entry of the pool
-                 */
-
-                state->forwarding_pool_index+=1;
-
-                /*
-                 * Reduce by one the counter of entries in the pool
-                 */
-
-                state->forwarding_pool_count-=1;
-
-                /*
-                 * If "index" is now beyond the limit of the pool, set it to the first position
-                 */
-
-                if(state->forwarding_pool_index==FORWARDING_POOL_DEPTH)
-                        state->forwarding_pool_index=0;
-
-                /*
-                 * Return the entry
-                 */
-
-                return entry;
-        }
-        else
-                /*
-                 * Empty pool
-                 */
-
+        if(!state->forwarding_pool_count)
                 return NULL;
+
+        /*
+         * The return value: the entry corresponding to element "index" of the pool
+         */
+
+        forwarding_queue_entry* entry=&state->forwarding_pool[state->forwarding_pool_index];
+
+        /*
+         * Set the "index" variable to the next available entry of the pool
+         */
+
+        state->forwarding_pool_index+=1;
+
+        /*
+         * Reduce by one the counter of entries in the pool
+         */
+
+        state->forwarding_pool_count-=1;
+
+        /*
+         * If "index" is now beyond the limit of the pool, set it to the first position
+         */
+
+        if(state->forwarding_pool_index==FORWARDING_POOL_DEPTH)
+                state->forwarding_pool_index=0;
+
+        /*
+         * Return the entry
+         */
+
+        return entry;
 }
 
 /*
@@ -107,7 +104,7 @@ forwarding_queue_entry* forwarding_pool_get(node_state* state){
 void forwarding_pool_put(forwarding_queue_entry* entry,node_state* state){
 
         /*
-         * Index of the first free plac where the entry will be stored
+         * Index of the first free place where the entry will be stored
          */
 
         unsigned char index;
@@ -551,12 +548,6 @@ void start_forwarding_engine(node_state* state){
         state->data_packet_seqNo=0;
 
         /*
-         * And finally set the flags of the FORWARDING ENGINE to 0
-         */
-
-        state->forwarding_engine_state=0;
-
-        /*
          * Check if it's the root node: if not, schedule the sending of a data packet
          */
 
@@ -655,8 +646,6 @@ bool send_data_packet(node_state* state) {
          */
 
         first_entry=state->forwarding_queue[state->forwarding_queue_head];
-        printf("Last enqueued packet for node %d has payload:%d\n",state->me.ID,first_entry->data_packet->payload);
-        printf("node 1 head:%d tail:%d\n",state->forwarding_queue_head,state->forwarding_queue_tail);
 
         /*
          * Perform the check on the packet corresponding to the selected entry of the queue
@@ -669,7 +658,6 @@ bool send_data_packet(node_state* state) {
                  * packet from the output queue...
                  */
 
-                printf("dequeing packet with payload %d\n",first_entry->data_packet->payload);
                 forwarding_queue_dequeue(state);
 
                 /*
@@ -715,6 +703,13 @@ bool send_data_packet(node_state* state) {
         parent=get_parent(state);
 
         /*
+         * Check if the parent is valid, i.e. its coordinates are not set to INT_MAX
+         */
+
+        if(parent.coordinates.x==INT_MAX)
+                printf("wrong parent for node %d\n",state->me.ID);
+
+        /*
          * Set the "src" and "dst" fields of the physical overhead of the packet
          */
 
@@ -726,7 +721,6 @@ bool send_data_packet(node_state* state) {
          * parent node reported in the physical layer frame of the packet
          */
 
-        printf("node %d now sending packet with payload %d\n",state->me.ID,first_entry->data_packet->payload);
         unicast_event(first_entry->data_packet,state->lvt);
 
         /*
@@ -775,6 +769,10 @@ void create_data_packet(node_state* state){
 
         ctp_data_packet_frame *data_frame;
 
+        /*
+         * Check if the last data packet created has already been acknowledged: if not, wait before creating a new one
+         */
+
         if(!(state->state&SENDING)) {
 
                 /*
@@ -782,7 +780,6 @@ void create_data_packet(node_state* state){
                  */
 
                 state->data_packet.payload = RandomRange(MIN_PAYLOAD, MAX_PAYLOAD);
-                printf("node %d adding packet with payload %d\n", state->me.ID, state->data_packet.payload);
 
                 /*
                  * Get the data frame from the data packet to be sent
@@ -856,12 +853,6 @@ void create_data_packet(node_state* state){
                         state->local_entry.is_local = true;
 
                         /*
-                         * Check if the last data packet created has been successfully send: if not, wait
-                         */
-
-                        // if(!(state->state&SENDING)) {
-
-                        /*
                          * Insert the entry for the packet to be sent in the forwarding queue: we have already seen that the
                          * queue is not full, so we don't further check the return value of the following call
                          */
@@ -874,7 +865,6 @@ void create_data_packet(node_state* state){
                          */
 
                         state->state |= SENDING;
-                        //}
 
                         /*
                          * Now that the packet has been successfully queued up, it's time to send the data packet. Call the
@@ -894,6 +884,11 @@ void create_data_packet(node_state* state){
                 }
         }
         else{
+                /*
+                 * The last packet created by this node has not been acknowledged yet => try to speed up the sending
+                 * of the packets in the forwarding queue
+                 */
+
                 send_data_packet(state);
         }
 }
@@ -917,41 +912,23 @@ void create_data_packet(node_state* state){
 bool receive_data_packet(void* message,node_state* state) {
 
         /*
-         * THL of the data packet received
-         */
-
-        unsigned char thl;
-
-        /*
          * Parse the buffer received to a data packet
          */
 
-        ctp_data_packet packet = *((ctp_data_packet *) message);
+        ctp_data_packet* packet = (ctp_data_packet *) message;
 
         /*
-         * Read the THL from the forwarding frame of the data packet
+         * Increment the THL, because the packet is being forwarded by the current node
          */
 
-        thl = packet.data_packet_frame.THL;
-
-        /*
-         * Increment the THL, beacause the packet is being forwarded by the current node
-         */
-
-        ++thl;
-
-        /*
-         * Update the dedicated field of the forwarding frame with the new value of thl
-         */
-
-        packet.data_packet_frame.THL = thl;
+        packet->data_packet_frame.THL+=1;
 
         /*
          * Now check if this is a duplicated one => first check if it has been already transmitted, looking for it in
          * the output cache
          */
 
-        if (cache_lookup(&packet.data_packet_frame, state) < state->output_cache_count) {
+        if (cache_lookup(&packet->data_packet_frame, state) < state->output_cache_count) {
 
                 /*
                  * The received message has been recently sent, so this is a duplicate => drop it
@@ -968,8 +945,7 @@ bool receive_data_packet(void* message,node_state* state) {
          */
 
         if (state->forwarding_queue_count){
-                printf("Check if alreay sent\n");
-                if (forwarding_queue_lookup(&packet.data_packet_frame, state->forwarding_queue,
+                if (forwarding_queue_lookup(&packet->data_packet_frame, state->forwarding_queue,
                                             state->forwarding_queue_count)) {
 
                         /*
@@ -993,7 +969,7 @@ bool receive_data_packet(void* message,node_state* state) {
                  * that are read in order to decide whether the simulation has come to and end or not
                  */
 
-                collected_data_packet(&packet,state->me.ID);
+                collected_data_packet(packet);
         }
         else{
 
@@ -1001,7 +977,7 @@ bool receive_data_packet(void* message,node_state* state) {
                  * Forward the data packet frame of the packet received
                  */
 
-                forward_data_packet(&packet,state);
+                forward_data_packet(packet,state);
         }
 
         /*
@@ -1037,7 +1013,8 @@ void forward_data_packet(ctp_data_packet* packet,node_state* state){
                 forwarding_queue_entry* entry;
 
                 /*
-                 * Get the entry from the pool
+                 * Get the entry from the pool; can't be NULL because we have already checked if the poil is empty or
+                 * not
                  */
 
                 entry=forwarding_pool_get(state);
@@ -1111,13 +1088,26 @@ void forward_data_packet(ctp_data_packet* packet,node_state* state){
                         }
 
                         /*
-                         * We get here if no loop has been detected or if it has been detected and it has been fixed
+                         * If the node is waiting acknowledgment of the last sent data packet, hold on
+                         */
+
+                        if(state->state&ACK_PENDING)
+                                return;
+
+                        /*
+                         * We get here if no loop has been detected or if it has been detected and it has been fixed and
+                         * the node is not waiting for the acknowledgment at the moment
                          * => start sending packets in the forwarding queue, so the packet received will be forwarded
                          * sooner or later
                          */
 
-                        printf("node %d forwards packet from node %d\n",state->me.ID,entry->data_packet->phy_mac_overhead.src.ID);
                         send_data_packet(state);
+
+                        /*
+                         * Set the state of the node to ACK_PENDING
+                         */
+
+                        state->state|=ACK_PENDING;
                 }
 
                 /*
@@ -1199,20 +1189,27 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                          * the forwarding queue, so that the next packet will be sent in the next forwarding phase
                          */
 
-                        printf("receive ack1 dequeing packet with payload %d\n",head_entry->data_packet->payload);
                         forwarding_queue_dequeue(state);
 
                         /*
                          * If the data packet was created by the node, clear the SENDING flag
                          */
 
-                        state->state&=~SENDING;
+                        if(head_entry->is_local)
+                                state->state&=~SENDING;
+                        else
+
+                                /*
+                                 * Otherwise, give the entry back to the pool
+                                 */
+
+                                forwarding_pool_put(head_entry,state);
 
                         /*
-                         * Return the entry of the last sent data packet to the forwarding pool
+                         * We dropped the packet => no longer waiting for an ack by the recipient
                          */
 
-                        forwarding_pool_put(head_entry,state);
+                        state->state&=~ACK_PENDING;
 
                         /*
                          * Then start a new transmission phase, which will involve the next packet in the output queue
@@ -1224,17 +1221,10 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
         else{
 
                 /*
-                 * Packet has been acknowledged by the recipient => get a copy of the last sent packet
+                 * Packet has been acknowledged by the recipient => remove the message from the output queue, so that
+                 * next transmission phase will send the next packet in the output queue
                  */
 
-                forwarding_queue_entry head_entry_copy=*head_entry;
-
-
-                /* Then remove the message from the output queue, so that next transmission phase will send the next
-                 * packet in the output queue
-                 */
-
-                printf("receive ack2 dequeing packet with payload %d\n",head_entry->data_packet->payload);
                 forwarding_queue_dequeue(state);
 
                 /*
@@ -1244,14 +1234,22 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                  * packet sent
                  */
 
-                check_if_ack_received(head_entry_copy.data_packet->phy_mac_overhead.dst.ID,false,state->link_estimator_table);
+                check_if_ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,
+                                      true,state->link_estimator_table);
 
                 /*
                  * If the last packet sent was a forwarded one, insert in the output cache in order to avoid duplicates
                  */
 
-                if(!head_entry->is_local)
-                        cache_enqueue(&head_entry->data_packet->data_packet_frame,state);
+                if(!head_entry->is_local) {
+                        cache_enqueue(&head_entry->data_packet->data_packet_frame, state);
+
+                        /*
+                         * Return the entry of the last sent data packet to the forwarding pool
+                         */
+
+                        forwarding_pool_put(head_entry,state);
+                }
                 else{
 
                         /*
@@ -1262,10 +1260,10 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                 }
 
                 /*
-                 * Return the entry of the last sent data packet to the forwarding pool
+                 * The packet has been acknowledged => clear corresponding flag
                  */
 
-                forwarding_pool_put(head_entry,state);
+                state->state&=~ACK_PENDING;
 
                 /*
                  * Then start a new transmission phase, which will involve the next packet in the output queue

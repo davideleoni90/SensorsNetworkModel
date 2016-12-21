@@ -581,11 +581,11 @@ unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* 
  * Function used by the routing engine to get the coordinates of the neighbor that is currently selected as parent of
  * the current node; returns "NULL" if the given parent ID is not valid
  *
- * @parent: ID of the current parent
+ * @parent: pointer to the structure representing the parent node
  * @link_estimator_table: pointer to the link estimator table of the node
  */
 
-node_coordinates* get_parent_coordinates(unsigned int parent,link_estimator_table_entry* link_estimator_table){
+void get_parent_coordinates(node* parent,link_estimator_table_entry* link_estimator_table){
 
         /*
          * Index of the entry in the estimator table corresponding to the parent
@@ -597,25 +597,30 @@ node_coordinates* get_parent_coordinates(unsigned int parent,link_estimator_tabl
          * Get the index
          */
 
-        index=find_estimator_entry(parent,link_estimator_table);
+        index=find_estimator_entry(parent->ID,link_estimator_table);
 
         /*
          * Check that the entry matching the given parent ID exists
          */
 
-        if(index==INVALID_ADDRESS)
+        if(index==INVALID_ADDRESS) {
 
                 /*
-                 * The given ID is unknown to the link estimator => return NULL
+                 * The given ID is unknown to the link estimator => set both coordinates to INT_MAX in order to signal
+                 * error
                  */
 
-                return NULL;
+                parent->coordinates.x = INT_MAX;
+                parent->coordinates.y = INT_MAX;
+        }
 
         /*
-         * The given ID has a corresponding entry in the estimator table => return the value of the coordinates
+         * The given ID has a corresponding entry in the estimator table => initialize the pointer to the coordinates
+         * of the node in the entry
          */
 
-        return &link_estimator_table[index].neighbor.coordinates;
+        parent->coordinates.x=link_estimator_table[index].neighbor.coordinates.x;
+        parent->coordinates.y=link_estimator_table[index].neighbor.coordinates.y;
 }
 
 /*

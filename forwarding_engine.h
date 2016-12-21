@@ -21,33 +21,33 @@ enum{
          * and reacts properly
          */
 
-        DATA_PACKET_ACK_OFFSET=3,
+        DATA_PACKET_ACK_OFFSET=2,
 
         /*
          * Interval of time after which the node tries to resend a data packet that has not been acknowledged
          */
 
-        DATA_PACKET_RETRANSMISSION_OFFSET=3,
+        DATA_PACKET_RETRANSMISSION_OFFSET=2,
 
         /*
          * Interval of time after which the node tries to resend a data packet in case it has not chosen a parent yet
          */
 
-        NO_ROUTE_OFFSET=3,
+        NO_ROUTE_OFFSET=4,
 
         /*
          * Interval of time after which the node tries to resend a data packet after a routing loop has been detected
          * and (hopefully) fixed
          */
 
-        LOOP_DETECTED_OFFSET=3,
+        LOOP_DETECTED_OFFSET=2,
 
         /*
          * Period of the timer that triggers the sending of a new data packet
          */
 
-        SEND_PACKET_TIMER=2,
-        MIN_PAYLOAD=0, // Lower bound for the range of the data gathered by the node
+        SEND_PACKET_TIMER=10,
+        MIN_PAYLOAD=10, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
 };
 

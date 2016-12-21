@@ -22,6 +22,7 @@
  */
 
 #include <ROOT-Sim.h>
+#include <limits.h>
 #include "application.h"
 
 //TODO node_running
@@ -1141,7 +1142,7 @@ node get_parent(node_state* state){
          * Ask the link estimator for coordinates of the parent
          */
 
-        parent.coordinates=*get_parent_coordinates(parent.ID,state->link_estimator_table);
+        get_parent_coordinates(&parent,state->link_estimator_table);
 
         /*
          * Return the parent
