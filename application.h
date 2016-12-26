@@ -18,14 +18,21 @@
  */
 
 enum{
-        SEND_BEACONS_TIMER_FIRED=1, // The timer for beacons has been fired  => broadcast a beacon
-        SEND_PACKET_TIMER_FIRED=2, // The timer for data packets has been fired  => send a data packet
-        UPDATE_ROUTE_TIMER_FIRED=3, // The timer for updating the route has been fired
-        SET_BEACONS_TIMER=4, // The interval of the timer for beacons has to be updated
-        DATA_PACKET_RECEIVED=5, // The node has received a data packet
-        BEACON_RECEIVED=6, // The node has received a data packet
-        RETRANSMITT_DATA_PACKET=7, // Try to re-send a data packet whose first sending attempt failed
-        CHECK_ACK_RECEIVED=8 // After the maximum time for receiving an ack has passed, check whether it has been received
+        /*
+         * After the root node (logical process) has parsed the configuration file provided by the user (containing
+         * coordinates of the nodes), it broadcasts this event to all the other nodes to tell them they can finally
+         * start
+         */
+
+        START_NODE=1,
+        SEND_BEACONS_TIMER_FIRED=2, // The timer for beacons has been fired  => broadcast a beacon
+        SEND_PACKET_TIMER_FIRED=3, // The timer for data packets has been fired  => send a data packet
+        UPDATE_ROUTE_TIMER_FIRED=4, // The timer for updating the route has been fired
+        SET_BEACONS_TIMER=5, // The interval of the timer for beacons has to be updated
+        DATA_PACKET_RECEIVED=6, // The node has received a data packet
+        BEACON_RECEIVED=7, // The node has received a data packet
+        RETRANSMITT_DATA_PACKET=8, // Try to re-send a data packet whose first sending attempt failed
+        CHECK_ACK_RECEIVED=9 // After the maximum time for receiving an ack has passed, check whether it has been received
 };
 
 /*
@@ -56,10 +63,16 @@ enum{
         MESSAGE_DELIVERY_TIME=1,
 
         /*
-         * Lower bound of data packets received by the root for the simulation to stop
+         * Lower bound of data packets received by the root from each node for the simulation to stop
          */
 
         COLLECTED_DATA_PACKETS_GOAL=10,
+
+        /*
+         * Upper bound of data packets received by the root for the simulation to stop
+         */
+
+        COLLECTED_DATA_PACKETS_MAX=50,
 
         /*
          * Maximum euclidean distance between two nodes for them to be considered neighbors

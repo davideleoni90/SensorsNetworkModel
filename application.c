@@ -53,6 +53,14 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
         node this_node;
 
+        node_coordinates coordinates;
+
+        /*
+         * Index to iterate through nodes
+         */
+
+        int i;
+
         /*
          * Initialize the local pointer to the pointer provided by the simulator
          */
@@ -78,16 +86,22 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * NODE INITIALIZATION
                          *
                          * This is the default event signalled by the simulator to each logical process => it triggers
-                         * the initialization phase.
+                         * the initialization of the node.
                          *
-                         * In this phase, the parameters of the simulation should be parsed but, most importantly, a new
-                         * state object is dynamically allocated and its address is communicated to the simulator by
-                         * mean of the API function "SetState" => in this way the simulator is aware of the memory
-                         * address of the state object of processes, so it can transparently bring it back to a previous
-                         * configuration in case of inconsistency problems.
+                         * In this phase, a new state object is dynamically allocated and its address is communicated to
+                         * the simulator by mean of the API function "SetState" => in this way the simulator is aware of
+                         * the memory address of the state object of processes, so it can transparently bring them back
+                         * to a previous configuration in case of inconsistency problems.
                          *
-                         * Besides this operations, which are common to any model, this specific model requires the
-                         * initialization of the Collection Tree Protocol (CTP) stack.
+                         * But before the simulation can start, it is necessary to parse the configuration file provided
+                         * by the user, containing the coordinates of all the node (possibly the ID of the node chosen
+                         * as root of the collection tree) => since this implies dynamic memory allocation, only one
+                         * node (the one with ID 0 or the one chosen by the user) performs this task, so the start of
+                         * the other node has to be deferred
+                         * => as soon as it has taken this step, it broadcasts a further event (START_NODE) to all the
+                         * other nodes: at this point the other nodes can properly start.
+                         *
+                         * The following steps have to be taken by all the nodes
                          */
 
                         /*
@@ -112,24 +126,10 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         bzero(state, sizeof(node_state));
 
-                        /* GET PARAMETERS OF THE SIMULATION - start */
-
                         /*
-                         * Parse the configuration file: if this is not specified, return with error
-                         */
-
-                        if(IsParameterPresent(event_content, "path")) {
-                                parse_configuration_file(GetParameterString(event_content, "path"));
-                        }
-                        else{
-                                printf("[FATAL ERROR] The path a to configuration file is mandatory => specify it after "
-                                               "the argument \"path\"\n");
-                                free((state));
-                                exit(EXIT_FAILURE);
-                        }
-
-                        /*
-                         * Get the ID of the root node
+                         * Get the ID of the root node; if the user does not provide this parameter, the default root
+                         * is node 0.
+                         * The node chosen as root node sets the corresponding global variable to its own ID
                          */
 
                         if(IsParameterPresent(event_content, "root")){
@@ -145,8 +145,10 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * corresponding global value
                                  */
 
-                                if(root<n_prc_tot)
-                                        ctp_root=root;
+                                if(root<n_prc_tot) {
+                                        if(me==root)
+                                                ctp_root = root;
+                                }
                                 else{
 
                                         /*
@@ -160,9 +162,67 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 }
                         }
 
+                        /*
+                         * All logical processes (except root node) stop here, waiting for the signal to start the node
+                         */
+
+                        if(me==ctp_root){
+
+                                /* GET NODES OF THE SIMULATION (ONLY THE ROOT NODE) - start */
+
+                                /*
+                                 * Parse the configuration file: if this is not specified, return with error
+                                 */
+
+                                if(IsParameterPresent(event_content, "path")) {
+                                        parse_configuration_file(GetParameterString(event_content, "path"));
+                                }
+                                else{
+                                        printf("[FATAL ERROR] The path a to configuration file is mandatory => specify it after "
+                                                       "the argument \"path\"\n");
+                                        free((state));
+                                        exit(EXIT_FAILURE);
+                                }
+
+                                /* GET NODES OF THE SIMULATION - end */
+
+                                /*
+                                 * Set the "root" flag in the state object
+                                 */
+
+                                state->root=true;
+
+                                /*
+                                 * All the parameters of the configuration have been parsed => tell all the processes
+                                 * that the time to start the simulation has come
+                                 */
+                                for(i=0;i<n_prc_tot;i++){
+                                        printf("scheduling start for %d,%d\n",nodes_list[i].x,nodes_list[i].y);
+                                        ScheduleNewEvent(i,now+(simtime_t)Random(),START_NODE,NULL,0);
+                                }
+
+                        }
+
+                        break;
+
+                case START_NODE:
 
                         /*
-                         * Store ID and coordinates in the state; the latter come from the list of nodes
+                         * START THE NODE
+                         *
+                         * This event comes after the INIT one =>
+                         *
+                         * 1 - the global array "nodes_list" contains the coordinates of all the nodes, indexed
+                         * according to their IDs
+                         * 2 - the "ctp_root" is initialized to either the ID chosen by the user for the root node or
+                         * or to 0 if the user did not provide any value for parameter "root"
+                         *
+                         * => every node stores its coordinates in its state object and then initializes its Collection
+                         * Tree Protocol stack, which is mandatory for it to be able to communicate with the other nodes
+                         */
+
+                        /*
+                         * First store ID and coordinates in the state
                          */
 
                         this_node.ID=me;
@@ -175,13 +235,10 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         state->state=RUNNING;
 
-                        /* GET PARAMETERS OF THE SIMULATION - end */
-
-                        /* SET CTP STACK - start */
+                        /* INIT CTP STACK - start */
 
                         /*
-                         * If this is the root node, set the corresponding flag in the state object and also initialize
-                         * the route, once for all
+                         * If this is the root node, set the corresponding flag in the state object
                          */
 
                         if(me==ctp_root) {
@@ -209,7 +266,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         start_forwarding_engine(state);
 
 
-                        /* SET CTP STACK - end */
+                        /* INIT CTP STACK - end */
+
                         break;
 
                 case UPDATE_ROUTE_TIMER_FIRED:
@@ -340,10 +398,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
  * when all the logic processes return true.
  *
  * The aim of this model is to simulate the implementation of the Collection Tree Protocol (CTP) => we stop when the
- * root node has received a number of data packets greater than or equal to COLLECTED_DATA_PACKETS_GOAL.
+ * root node has received a number of data packets greater than or equal to COLLECTED_DATA_PACKETS_GOAL from each node.
  * As a consequence, all the logic processes associated to nodes of the collection tree will always return true here,
- * while the logic process associated to the root will return true iff the number of data packets collected is greater
- * than or equal to COLLECTED_DATA_PACKETS_GOAL
+ * while the logic process associated to the root will return true iff the number of data packets collected from each
+ * node is greater than or equal to COLLECTED_DATA_PACKETS_GOAL.
+ * In order to avoid that the simulation runs forever if one node does not send enough packets, we also set a limit for
+ * the number of packets received by the root node.
  *
  */
 
@@ -355,19 +415,26 @@ bool OnGVT(unsigned int me, void*snapshot) {
          */
 
         if(((node_state*)snapshot)->root){
-                if(collected_packets>=50)
-                        return true;
-                int i=0;
-                bool terminate=true;
-                for(i=1;i<n_prc_tot;i++) {
-                        //printf("packets from %d:%d\n",i,collected_packets_list[i]);
-                        if ((collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL) && i!=4)
-                                terminate=false;
-                        else{}
-                                //printf("%d ok\n",i);
-                }
-                return terminate;
 
+                /*
+                 * If the number of packets  is above the limit, stop simulation
+                 */
+
+                if(collected_packets>=COLLECTED_DATA_PACKETS_MAX)
+                        return true;
+
+                /*
+                 * If more than COLLECTED_DATA_PACKETS_GOAL have been received by each node (except the root itself)
+                 * stop the simulation
+                 */
+                int i=0;
+                for(i=0;i<n_prc_tot;i++) {
+                        if(i==((node_state*)snapshot)->root)
+                                continue;
+                        if (collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL)
+                                return false;
+                }
+                return true;
         }
         else{
                 /*
@@ -566,7 +633,7 @@ void parse_configuration_file(const char* path){
          * allocated by other logical processes other than the current one
          */
 
-        nodes_list=realloc(nodes_list,sizeof(node_coordinates)*n_prc_tot);
+        nodes_list=malloc(sizeof(node_coordinates)*n_prc_tot);
 
         /*
          * Now read the file line by line and store the coordinates at line "i"at index "i" of the list

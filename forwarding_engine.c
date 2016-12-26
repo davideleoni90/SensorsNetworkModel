@@ -679,6 +679,10 @@ bool send_data_packet(node_state* state) {
          * Set the ETX field of the data frame
          */
 
+        printf("entry %p of node %d\n",first_entry,state->me.ID);
+        printf("packet %p\n",first_entry->data_packet);
+        printf("frame %p\n",&first_entry->data_packet->data_packet_frame);
+        fflush(stdout);
         first_entry->data_packet->data_packet_frame.ETX=etx;
 
         /*
