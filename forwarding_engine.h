@@ -2,8 +2,8 @@
 #define SENSORSNETWORKMODELPROJECT_FORWARDING_ENGINE_H
 
 #include <stdbool.h>
-typedef struct _ctp_data_packet ctp_data_packet;
 
+typedef struct _ctp_data_packet ctp_data_packet;
 
 /*
  * CONSTANTS RELATED TO FORWARDING
@@ -50,25 +50,6 @@ enum{
         MIN_PAYLOAD=10, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
 };
-
-/*
- * Structure associated to an element of the forwarding queue: it features a pointer to a data packet and a counter of
- * the number of times the engine has already tried to transmitting the packet.
- *
- * In order to send a data packet, a corresponding element of this type has to be stored in the forwarding queue => it
- * will remain in the queue until the packet is sent or the limit for the number of transmissions is reached
- */
-
-typedef struct {
-        ctp_data_packet* data_packet; // Pointer to the data packet to send
-        unsigned char retries; // Number of transmission attempts performed so far
-
-        /*
-         * Flag indicating whether the data packet is local, namely it has been created by the 
-         */
-
-        bool is_local;
-} forwarding_queue_entry;
 
 /* FORWARDING ENGINE API */
 

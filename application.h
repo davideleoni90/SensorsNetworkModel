@@ -6,11 +6,6 @@
 #include "forwarding_engine.h"
 #include <ROOT-Sim.h>
 
-/* DISTRIBUZIONI TIMESTAMP */
-#define UNIFORM		0
-#define EXPONENTIAL	1
-#define DISTRIBUTION	1
-
 /*
  * EVENT TYPES
  *
@@ -32,7 +27,19 @@ enum{
         DATA_PACKET_RECEIVED=6, // The node has received a data packet
         BEACON_RECEIVED=7, // The node has received a data packet
         RETRANSMITT_DATA_PACKET=8, // Try to re-send a data packet whose first sending attempt failed
-        CHECK_ACK_RECEIVED=9 // After the maximum time for receiving an ack has passed, check whether it has been received
+
+        /*
+         * The last data packet sent has been delivered => after the maximum time for receiving an ack has passed, check
+         * whether it has been received or not
+         */
+
+        CHECK_ACK_RECEIVED=9,
+
+        /*
+         * The ack for the last data packet will never be received because the packet itself has not been delivered
+         */
+
+        ACK_NOT_RECEIVED=10
 };
 
 /*
@@ -72,7 +79,7 @@ enum{
          * Upper bound of data packets received by the root for the simulation to stop
          */
 
-        COLLECTED_DATA_PACKETS_MAX=50,
+        MAX_TIME=1000,
 
         /*
          * Maximum euclidean distance between two nodes for them to be considered neighbors
@@ -147,6 +154,25 @@ typedef struct _ctp_data_packet{
         ctp_data_packet_frame data_packet_frame;
         int payload;
 }ctp_data_packet;
+
+/*
+ * Structure associated to an element of the forwarding queue: it features a pointer to a data packet and a counter of
+ * the number of times the engine has already tried to transmitting the packet.
+ *
+ * In order to send a data packet, a corresponding element of this type has to be stored in the forwarding queue => it
+ * will remain in the queue until the packet is sent or the limit for the number of transmissions is reached
+ */
+
+typedef struct _forwarding_queue_entry{
+        ctp_data_packet packet; // The data packet to send
+        unsigned char retries; // Number of transmission attempts performed so far
+
+        /*
+         * Flag indicating whether the data packet is local, namely it has been created by the
+         */
+
+        bool is_local;
+} forwarding_queue_entry;
 
 /*
  * ROUTE INFO
@@ -362,6 +388,6 @@ typedef struct _node_state{
 void wait_until(unsigned int me,simtime_t timestamp,unsigned int type);
 void collected_data_packet(ctp_data_packet* packet);
 void broadcast_event(ctp_routing_packet* beacon,simtime_t time);
-void unicast_event(ctp_data_packet* packet,simtime_t time);
+void unicast_event(ctp_data_packet* packet,simtime_t time, unsigned int me);
 
 #endif

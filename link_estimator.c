@@ -877,7 +877,7 @@ void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequenc
  * COMPUTE 1-HOP ETX OF A NEIGHBOR
  *
  * This function is used to compute the value of 1-hop ETX of the link to neighbor WHEN THE INGOING LINK QUALITY HAS
- * TO BE RECOMPUTED (after BLQ_PKT_WINDOW beacons from the neighbr itself have been received).
+ * TO BE RECOMPUTED (after BLQ_PKT_WINDOW beacons from the neighbor itself have been received).
  * In particular, this function returns ten times the value of the actual 1-hop ETX value.
  * This is needed because the function "updateETX" works on values scaled by 10, in order to avoid float variables and
  * still not losing too much precision due to integer division.
@@ -999,7 +999,7 @@ void update_outgoing_quality(link_estimator_table_entry* entry){
          * Recompute the 1-hop ETX of the link to the neighbor
          */
 
-        update_ETX(entry,new_outgoing_quality);
+        update_ETX(entry,compute_ETX(new_outgoing_quality));
 }
 
 /*
@@ -1514,9 +1514,9 @@ void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimat
                 /*
                  * If the ack has been received, increase by one the counter of acknowledged packets
                  */
-
-                if(ack_received)
+                if(ack_received) {
                         entry->data_acknowledged++;
+                }
 
                 /*
                  * Check whether the number of data packets sent to the neighbor has reached the bound that triggers an
@@ -1532,4 +1532,22 @@ void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimat
 
                         update_outgoing_quality(entry);
         }
+}
+
+void print_link_estimator_table(node_state* state){
+        link_estimator_table_entry* table=state->link_estimator_table;
+        int i;
+        printf("###############################\n\n");
+        printf("Estimator table for node %d\n",state->me.ID);
+        printf("Number of neighbors:%d\n",state->neighbors);
+        printf("Parent:%d\n",state->route.parent);
+        printf("Etx:%d\n",state->route.etx);
+        for(i=0;i<state->neighbors;i++){
+                printf("Neighbor:%d lastseq:%d received:%d missed:%d inquality:%d etx:%d\n",
+                table[i].neighbor.ID,table[i].lastseq,table[i].beacons_received,table[i].beacons_missed,
+                        table[i].ingoing_quality,table[i].one_hop_etx);
+                printf("Data sent:%d acks received:%d\n",table[i].data_sent,table[i].data_acknowledged);
+        }
+        printf("###############################\n\n");
+        fflush(stdout);
 }

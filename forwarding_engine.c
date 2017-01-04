@@ -288,7 +288,7 @@ bool forwarding_queue_lookup(ctp_data_packet_frame* data_frame,forwarding_queue_
                  * The data frame of the element of the output queue analyzed
                  */
 
-                ctp_data_packet_frame current=forwarding_queue[i]->data_packet->data_packet_frame;
+                ctp_data_packet_frame current=forwarding_queue[i]->packet.data_packet_frame;
 
                 /*
                  * If the current element matches the given packet return true
@@ -641,6 +641,13 @@ bool send_data_packet(node_state* state) {
         }
 
         /*
+         * Check whether the node is waiting for the acknowledgment of the last data packet sent: if so, hold on
+         */
+
+        if(state->state&ACK_PENDING)
+                return false;
+
+        /*
          * The node has a valid route (parent) => before sending the head packet, check that it's not duplicated.
          * Get a pointer the to entry corresponding to the head of the output queue
          */
@@ -651,7 +658,7 @@ bool send_data_packet(node_state* state) {
          * Perform the check on the packet corresponding to the selected entry of the queue
          */
 
-        if(cache_lookup(&first_entry->data_packet->data_packet_frame,state)<state->output_cache_count){
+        if(cache_lookup(&first_entry->packet.data_packet_frame,state)<state->output_cache_count){
 
                 /*
                  * The data packet is already in the output cache => is a duplicate => remove the entry of the current
@@ -679,26 +686,22 @@ bool send_data_packet(node_state* state) {
          * Set the ETX field of the data frame
          */
 
-        printf("entry %p of node %d\n",first_entry,state->me.ID);
-        printf("packet %p\n",first_entry->data_packet);
-        printf("frame %p\n",&first_entry->data_packet->data_packet_frame);
-        fflush(stdout);
-        first_entry->data_packet->data_packet_frame.ETX=etx;
+        first_entry->packet.data_packet_frame.ETX=etx;
 
         /*
          * Clear PULL flag from the packets to be forwarded
          */
 
-        first_entry->data_packet->data_packet_frame.options&=~CTP_PULL;
+        first_entry->packet.data_packet_frame.options&=~CTP_PULL;
 
         /*
          * Check if the node is congested: if so, set the flag in the packet, otherwise clear the flag
          */
 
         if(is_congested(state))
-                first_entry->data_packet->data_packet_frame.options|=CTP_CONGESTED;
+                first_entry->packet.data_packet_frame.options|=CTP_CONGESTED;
         else
-                first_entry->data_packet->data_packet_frame.options&=~CTP_CONGESTED;
+                first_entry->packet.data_packet_frame.options&=~CTP_CONGESTED;
 
         /*
          * Get the ID and coordinates of the recipient (parent node) from the routing engine
@@ -717,30 +720,21 @@ bool send_data_packet(node_state* state) {
          * Set the "src" and "dst" fields of the physical overhead of the packet
          */
 
-        first_entry->data_packet->phy_mac_overhead.src=state->me;
-        first_entry->data_packet->phy_mac_overhead.dst=parent;
+        first_entry->packet.phy_mac_overhead.src=state->me;
+        first_entry->packet.phy_mac_overhead.dst=parent;
 
         /*
          * Forward the data packet to the specified destination => schedule a new unicast event whose recipient is the
          * parent node reported in the physical layer frame of the packet
          */
 
-        unicast_event(first_entry->data_packet,state->lvt);
+        unicast_event(&first_entry->packet,state->lvt,state->me.ID);
 
         /*
          * The node is now waiting for the last data packet sent to be acknowledged => set the corresponding flag
          */
 
         state->state|=ACK_PENDING;
-
-        /*
-         * Schedule a new event after time equal to the DATA_PACKET_ACK_OFFSET, destined to the current node, in order
-         * to simulate that the data packet may or may not be acknowledged by the link layer of the recipient.
-         * This is crucial because the link estimator evaluates the link quality to the recipient also on the basis of
-         * acks received
-         */
-
-        wait_until(state->me.ID,state->lvt+DATA_PACKET_ACK_OFFSET,CHECK_ACK_RECEIVED);
 
         /*
          * The data packet has been sent => no need to re-execute this function
@@ -817,8 +811,8 @@ void create_data_packet(node_state* state){
                 data_frame->THL = 0;
 
                 /*
-                 * Check if there's at least one free entry in output queue to send the new packet => if this, is the case, the
-                 * variable "forwarding_queue_count" is less than the depth of the queue
+                 * Check if there's at least one free entry in output queue to send the new packet => if this, is the
+                 * case, the variable "forwarding_queue_count" is less than the depth of the queue
                  */
 
                 if (state->forwarding_queue_count < FORWARDING_QUEUE_DEPTH) {
@@ -829,23 +823,23 @@ void create_data_packet(node_state* state){
                          * 2-extracts a packet from it
                          * 3-sends it to the parent node.
                          *
-                         * If the head of the queue is a duplicate packet, it is removed => in this case the function returns
-                         * true, meaning that it has to be invoked again to send the next packet in the queue => the variable
-                         * below is set to true if a new sending attempt has to be made
+                         * If the head of the queue is a duplicate packet, it is removed => in this case the function
+                         * returns true, meaning that it has to be invoked again to send the next packet in the queue
+                         * => the variable below is set to true if a new sending attempt has to be made
                          */
 
                         bool try_again;
 
                         /*
-                         * There's free space in the forwarding queue => initialize the entry for the packet to be queued up.
-                         * Initialize the dedicated pointer to the data packet the entry corresponds to
+                         * There's free space in the forwarding queue => initialize the entry for the packet to be
+                         * queued up. Initialize the dedicated pointer to the data packet the entry corresponds to
                          */
 
-                        state->local_entry.data_packet = &state->data_packet;
+                        state->local_entry.packet = state->data_packet;
 
                         /*
-                         * Set the number of transmission attempt to its maximum value: every time a transmission fails, this
-                         * counter is decreased and when it's equal to 0 the packet is dropped
+                         * Set the number of transmission attempt to its maximum value: every time a transmission fails,
+                         * this counter is decreased and when it's equal to 0 the packet is dropped
                          */
 
                         state->local_entry.retries = MAX_RETRIES;
@@ -857,8 +851,8 @@ void create_data_packet(node_state* state){
                         state->local_entry.is_local = true;
 
                         /*
-                         * Insert the entry for the packet to be sent in the forwarding queue: we have already seen that the
-                         * queue is not full, so we don't further check the return value of the following call
+                         * Insert the entry for the packet to be sent in the forwarding queue: we have already seen that
+                         * the queue is not full, so we don't further check the return value of the following call
                          */
 
                         forwarding_queue_enqueue(&state->local_entry, state);
@@ -871,8 +865,8 @@ void create_data_packet(node_state* state){
                         state->state |= SENDING;
 
                         /*
-                         * Now that the packet has been successfully queued up, it's time to send the data packet. Call the
-                         * function the first time
+                         * Now that the packet has been successfully queued up, it's time to send the data packet. Call
+                         * the function the first time
                          */
 
                         try_again = send_data_packet(state);
@@ -1027,7 +1021,7 @@ void forward_data_packet(ctp_data_packet* packet,node_state* state){
                  * Initialize the pointer of the entry to the packet received
                  */
 
-                entry->data_packet=packet;
+                entry->packet=*packet;
 
                 /*
                  * Set the number of retransmissions attempts to MAX_RETRIES: this will be decreased every time a
@@ -1157,7 +1151,7 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                  * from the last data packet sent
                  */
 
-                check_if_ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,false,state->link_estimator_table);
+                check_if_ack_received(head_entry->packet.phy_mac_overhead.dst.ID,false,state->link_estimator_table);
 
                 /*
                  * Since the outgoing link quality between the current node and the recipient has possibly changed, it
@@ -1238,7 +1232,7 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                  * packet sent
                  */
 
-                check_if_ack_received(head_entry->data_packet->phy_mac_overhead.dst.ID,
+                check_if_ack_received(head_entry->packet.phy_mac_overhead.dst.ID,
                                       true,state->link_estimator_table);
 
                 /*
@@ -1246,7 +1240,7 @@ void receive_ack(bool is_packet_acknowledged,node_state* state){
                  */
 
                 if(!head_entry->is_local) {
-                        cache_enqueue(&head_entry->data_packet->data_packet_frame, state);
+                        cache_enqueue(&head_entry->packet.data_packet_frame, state);
 
                         /*
                          * Return the entry of the last sent data packet to the forwarding pool

@@ -8,7 +8,6 @@ typedef struct _node node;
 typedef struct _ctp_routing_frame ctp_routing_frame;
 typedef struct _node_state node_state;
 typedef struct _route_info route_info;
-//#include "application.h"
 
 /*
  * CONSTANTS RELATED TO ROUTING

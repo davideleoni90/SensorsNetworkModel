@@ -10,7 +10,7 @@ typedef double simtime_t;
 /*
  * NODE COORDINATES
  *
- * Each node (logic process) has some spatia coordinates, represented by this structure
+ * Each node (logic process) has some spatial coordinates, represented by this structure
  */
 
 typedef struct _node_coordinates{
@@ -30,8 +30,6 @@ typedef struct _node{
         node_coordinates coordinates;
 }node;
 
-//#include "application.h"
-
 /*
  * CONSTANTS RELATED TO THE LINK ESTIMATOR
  */
@@ -40,15 +38,15 @@ enum{
         NEIGHBOR_TABLE_SIZE=10, // Number of entries in the link estimator table (aka neighbor table)
 
         /*
-         * If a node has an 1-hop ETX below this threshold, it is evicted from the estimator table if a new entry has
-         * to added and the table itself is full
+         * If a node has an 1-hop ETX bigger than this threshold, it is evicted from the estimator table in case a new
+         * entry has to added and the table itself is full
          */
 
         EVICT_WORST_ETX_THRESHOLD=65,
 
         /*
-         * If a node has an 1-hop ETX below this threshold, it is evicted from the estimator table if a new entry has
-         * to added and the table itself is full AND A FREE PLACE FOR THE ROOT NODE HAS TO BE FOUND
+         * If a node has an 1-hop ETX bigger than this threshold, it is evicted from the estimator table if a new entry
+         * has to added and the table itself is full AND A FREE PLACE FOR THE ROOT NODE HAS TO BE FOUND
          *
          * Since the root is the most important, it's crucial to create an entry for it when a beacon by it is received
          * => if the table is full, another node has to be replaced => with such a tighter threshold, which corresponds
@@ -71,8 +69,8 @@ enum{
 
         VERY_LARGE_ETX_VALUE=0xffff,
         ALPHA=9, // The link estimation is exponentially decayed with this parameter ALPHA
-        DLQ_PKT_WINDOW=5, // Number of packets to send before updating the outgoing quality of the link to a neighbor
-        BLQ_PKT_WINDOW=3, // Number of beacons to receive before updating the ingoing quality of the link to a neighbor
+        DLQ_PKT_WINDOW=5, // # of packets to be sent before updating the outgoing quality of the link to a neighbor
+        BLQ_PKT_WINDOW=3, // # of beacons to be received before updating the ingoing quality of the link to a neighbor
         INVALID_ENTRY=0xff // Value returned when the entry corresponding to a neighbor is not found
 
 };
@@ -164,5 +162,6 @@ void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_ta
 void get_parent_coordinates(node* parent,link_estimator_table_entry* link_estimator_table);
 void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
 void init_link_estimator_table(link_estimator_table_entry* link_estimator_table);
+void print_link_estimator_table(node_state* state);
 
 #endif

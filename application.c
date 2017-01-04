@@ -5,12 +5,29 @@
 #include "application.h"
 #include "forwarding_engine.h"
 #include <math.h>
+#include <limits.h>
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
-unsigned char collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
-unsigned int collected_packets_list[5];
+double discarded_packets=0;
+double accepted_packets=0;
+
+
+double collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
+
+/*
+ * The vector containing a counter of packets received by the root of the collection tree from the other nodes
+ */
+
+unsigned int* collected_packets_list;
 FILE* file; // Pointer to the file object associated to the configuration file
+
+/*
+ * The packets collected within an interval of 100 instants of time are printed; in particular, they are printed at
+ * virtual time 100*time_factor, where time_factor is incremented after every printing
+ */
+
+unsigned char time_factor=1;
 
 /*
  * ID of the node chosen as root of the collection tree => all the data packets will (hopefully) be collected by this
@@ -18,7 +35,27 @@ FILE* file; // Pointer to the file object associated to the configuration file
  * If the ID of the node is not specified as parameter of the simulation, the default root is the node with ID=0
  */
 
-unsigned int ctp_root=0;
+unsigned int ctp_root=UINT_MAX;
+unsigned char failed_nodes=0; // Number of nodes failed; this is one of the reasons for the simulation to stop
+
+/*
+ * FAILURE LAMBDA
+ *
+ * The lambda parameter of the exponential failure distribution: it depends on the devices used as node of the collection
+ * tree and is equivalent to the failure rate or MTTF(Mean Time To Failure)
+ */
+
+double failure_lambda=0.0005;
+
+/*
+ * FAILURE PROBABILITY THRESHOLD
+ *
+ * The exponential failure distribution tells the probability that a failure occurs before a certain time =>
+ * the following parameter determines which is the minimum probability for the node to be considered as failed by the
+ * simulator
+ */
+
+double failure_threshold=0.9;
 
 /* DECLARATIONS */
 
@@ -26,18 +63,21 @@ void parse_configuration_file(const char* path);
 void start_routing_engine(node_state* state);
 void is_ack_received(node_state* state);
 bool message_received(node_coordinates a,node_coordinates b);
+bool is_failed(simtime_t now);
 
 /*
  * Pointer to the dynamically allocated array containing the list of the the coordinates of the nodes in the network
  * (length = n_proc_tot, the number of logical processes in the simulation) indexed according to the ID of the node;
  * the coordinates of the nodes are read from a configuration file decided by the user.
- * Within the INIT event, each logical process parses the configuration file to fill the list of nodes.
- * TODO check if this can be made more efficiently
  */
 
 node_coordinates* nodes_list;
 
 /* GLOBAL VARIABLES (shared among all logical processes) - end */
+
+/*
+ * Application-level callback: this is the interface between the simulator and the model being simulated
+ */
 
 void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_content, unsigned int size, void *ptr) {
 
@@ -75,6 +115,46 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                 state->lvt=now;
 
         /*
+         * First check if the node is already failed (the RUNNING flag of the state variable is not set): if so, the
+         * event can't be further processed by the logical process, so return; otherwise, go ahead.
+         * Before the simulation actually starts, no node has the running flag set but it is not failed yet, so skip
+         * the check at time 0
+         */
+
+        if(now) {
+                if(!(state->state&RUNNING))
+                        return;
+        }
+
+        /*
+         * Then check if the node is now failing: if so, clear the RUNNING flag in the state variable and then return
+         */
+
+        if(is_failed(now)) {
+
+                /*
+                 * Clear RUNNING FLAG
+                 */
+
+                state->state&=~RUNNING;
+
+                /*
+                 * Increment by one the counter of failed nodes
+                 */
+
+                failed_nodes++;
+
+                printf("Node %d died at time %f\n",me,now);
+                fflush(stdout);
+
+                /*
+                 * Finally return
+                 */
+
+                return;
+        }
+
+        /*
          * Depending on the event type, perform different tasks
          */
 
@@ -93,13 +173,13 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * the memory address of the state object of processes, so it can transparently bring them back
                          * to a previous configuration in case of inconsistency problems.
                          *
-                         * But before the simulation can start, it is necessary to parse the configuration file provided
-                         * by the user, containing the coordinates of all the node (possibly the ID of the node chosen
-                         * as root of the collection tree) => since this implies dynamic memory allocation, only one
-                         * node (the one with ID 0 or the one chosen by the user) performs this task, so the start of
-                         * the other node has to be deferred
-                         * => as soon as it has taken this step, it broadcasts a further event (START_NODE) to all the
-                         * other nodes: at this point the other nodes can properly start.
+                         * Before the simulation can start, it is necessary to parse the configuration file provided
+                         * by the user, containing the coordinates of all the nodes (and possibly also the ID of the node
+                         * chosen as root of the collection tree) => since this implies dynamic memory allocation, only
+                         * one node (the one with ID 0 or the one chosen by the user) performs this task, so the actual
+                         * start of the other nodes has to be deferred
+                         * => as soon as it has taken this step, an event (START_NODE) is broadcasted to all the other
+                         * nodes: at this point they can properly start.
                          *
                          * The following steps have to be taken by all the nodes
                          */
@@ -127,12 +207,19 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         bzero(state, sizeof(node_state));
 
                         /*
+                         * Set the RUNNING flag
+                         */
+
+                        state->state|=RUNNING;
+
+                        /*
                          * Get the ID of the root node; if the user does not provide this parameter, the default root
                          * is node 0.
                          * The node chosen as root node sets the corresponding global variable to its own ID
                          */
 
-                        if(IsParameterPresent(event_content, "root")){
+                        if(IsParameterPresent(event_content, "root"))
+                        {
 
                                 /*
                                  * The ID of the node
@@ -160,6 +247,16 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                         free((state));
                                         exit(EXIT_FAILURE);
                                 }
+                        }
+                        else{
+
+                                /*
+                                 * The user did not choose any node as root => the node with ID 0 declares itself to
+                                 * be the root
+                                 */
+
+                                if(!me)
+                                        ctp_root=0;
                         }
 
                         /*
@@ -193,13 +290,23 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 state->root=true;
 
                                 /*
+                                 * Allocate the array for counters of packets received by the root from the nodes
+                                 */
+
+                                collected_packets_list=malloc(sizeof(unsigned int)*n_prc_tot);
+
+                                /*
+                                 * Initialize counters to 0
+                                 */
+
+                                bzero(collected_packets_list,sizeof(unsigned int)*n_prc_tot);
+
+                                /*
                                  * All the parameters of the configuration have been parsed => tell all the processes
                                  * that the time to start the simulation has come
                                  */
-                                for(i=0;i<n_prc_tot;i++){
-                                        printf("scheduling start for %d,%d\n",nodes_list[i].x,nodes_list[i].y);
+                                for(i=0;i<n_prc_tot;i++)
                                         ScheduleNewEvent(i,now+(simtime_t)Random(),START_NODE,NULL,0);
-                                }
 
                         }
 
@@ -228,12 +335,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         this_node.ID=me;
                         this_node.coordinates=nodes_list[me];
                         state->me=this_node;
-
-                        /*
-                         * Set the state of the node to RUNNING
-                         */
-
-                        state->state=RUNNING;
 
                         /* INIT CTP STACK - start */
 
@@ -318,8 +419,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * packet and send it to the root node
                          */
 
-                        if(!(state->state&ACK_PENDING))
+                        if(!(state->state&ACK_PENDING)) {
                                 create_data_packet(state);
+                        }
 
                         /*
                          * The time simulated through this event is periodic => schedule this event after the same amount
@@ -384,6 +486,15 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         is_ack_received(state);
                         break;
 
+                case ACK_NOT_RECEIVED:
+
+                        /*
+                         * The parent node did not receive the last data packet sent => tell this to the node
+                         */
+
+                        receive_ack(false,state);
+                        break;
+
                 default:
                         printf("Events not handled\n");
 
@@ -402,8 +513,11 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
  * As a consequence, all the logic processes associated to nodes of the collection tree will always return true here,
  * while the logic process associated to the root will return true iff the number of data packets collected from each
  * node is greater than or equal to COLLECTED_DATA_PACKETS_GOAL.
- * In order to avoid that the simulation runs forever if one node does not send enough packets, we also set a limit for
- * the number of packets received by the root node.
+ * In order to avoid that the simulation runs forever if one of the nodes does not send enough packets, we also set a
+ * time limit by mean of the variable MAX_TIME: when the virtual time reaches this value, the simulation stops, no
+ * matter how many packets have been collected from each node.
+ *
+ * The simulation also stops when the root node fails or if there's no other node alive but the root of the tree
  *
  */
 
@@ -411,29 +525,126 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 bool OnGVT(unsigned int me, void*snapshot) {
 
         /*
-         * If the current node is the root of the collection tree, check the number of data packets received
+         * Index variable used to iterate through nodes of the simulation
+         */
+
+        int i=0;
+
+        /*
+         * If the current node is the root of the collection tree, check that there are still some node alive and
+         * also check the number of data packets received
          */
 
         if(((node_state*)snapshot)->root){
 
                 /*
-                 * If the number of packets  is above the limit, stop simulation
+                 * First check if the root is still alive: if so, terminate the simulation
                  */
 
-                if(collected_packets>=COLLECTED_DATA_PACKETS_MAX)
+                if(!(((node_state*)snapshot)->state&RUNNING))
                         return true;
+
+                /*
+                 * Then check that there's at least one node running: if not, stop the simulation
+                 */
+
+                if(n_prc_tot-failed_nodes<=1)
+                        return true;
+
+                /*
+                 * If the value of virtual time is beyond the limit, stop the simulation
+                 */
+
+                if(((int)(((node_state*)snapshot)->lvt)%MAX_TIME==0) &&( ((node_state*)snapshot)->lvt>1)){
+                        printf("\n\nSimulation stopped because reached the limit of time:%f\n"
+                                       "Packets collected by root:%f\n"
+                                ,((node_state*)snapshot)->lvt,collected_packets);
+                        for(i=0;i<n_prc_tot;i++) {
+                                if(i==ctp_root)
+
+                                        /*
+                                         * Root node does not send packets, only collects them
+                                         */
+
+                                        continue;
+                                printf("Packets from %d:%d\n",i,collected_packets_list[i]);
+                        }
+                        printf("discarded:%f\n",discarded_packets);
+                        printf("accepted:%f\n",accepted_packets);
+                        printf("ratio:%f\n",discarded_packets/accepted_packets);
+                        fflush(stdout);
+                        return true;
+                }
+
+                /*
+                 * Print the number of packets received by the root from each other node; do this once every 100 instants
+                 * of virtual time
+                 */
+
+                if(((int)(((node_state*)snapshot)->lvt)%(100*time_factor)==0) &&( ((node_state*)snapshot)->lvt>1)){
+                        printf("\n\nChecking packets collected at time %f\n",((node_state*)snapshot)->lvt);
+                        for(i=0;i<n_prc_tot;i++) {
+                                if(i==ctp_root)
+
+                                        /*
+                                         * Root node does not send packets, only collects them
+                                         */
+
+                                        continue;
+                                printf("Packets from %d:%d\n",i,collected_packets_list[i]);
+                        }
+
+                        /*
+                         * Increment the time factor, otherwise the information about packets collected so far would be
+                         * printed more than once every 100 instants of virtual time (since the simulation time is of
+                         * type "double")
+                         */
+
+                        time_factor++;
+                        printf("\n");
+                }
 
                 /*
                  * If more than COLLECTED_DATA_PACKETS_GOAL have been received by each node (except the root itself)
                  * stop the simulation
                  */
-                int i=0;
+
                 for(i=0;i<n_prc_tot;i++) {
-                        if(i==((node_state*)snapshot)->root)
+                        if(i==ctp_root)
+
+                                /*
+                                 * Root node does not send packets, only collects them
+                                 */
+
                                 continue;
-                        if (collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL)
+                        if (collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL) {
+                                fflush(stdout);
                                 return false;
+                        }
                 }
+                printf("\n\nSimulation stopped because at least %d packets have been collected from each node\n"
+                               "Time:%f\nPackets collected by root:%f\n"
+                        ,COLLECTED_DATA_PACKETS_GOAL,((node_state*)snapshot)->lvt,collected_packets);
+
+                /*
+                 * Print packets collected from each node
+                 */
+
+                for(i=0;i<n_prc_tot;i++) {
+
+                        if(i==ctp_root)
+
+                                /*
+                                 * Root node does not send packets, only collects them
+                                 */
+
+                                continue;
+                        printf("Packets from %d:%d\n",i,collected_packets_list[i]);
+                }
+                printf("discarded:%f\n",discarded_packets);
+                printf("accepted:%f\n",accepted_packets);
+                printf("ratio:%f\n",discarded_packets/accepted_packets);
+                fflush(stdout);
                 return true;
         }
         else{
@@ -444,6 +655,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
                 return true;
         }
 }
+
 
 /* SIMULATION API - start */
 
@@ -537,9 +749,10 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
  *
  * @packet: the message to be sent
  * @time: virtual time when the message should be delivered
+ * @me: ID of the sender
  */
 
-void unicast_event(ctp_data_packet* packet,simtime_t time) {
+void unicast_event(ctp_data_packet* packet,simtime_t time, unsigned int me) {
 
         /*
          * Coordinates of the parent node
@@ -567,12 +780,33 @@ void unicast_event(ctp_data_packet* packet,simtime_t time) {
 
         /*
          * If the message can be received by the parent, according to the simulator, it will process an event of type
-         * "DATA_PACKET_RECEIVED"
+         * "DATA_PACKET_RECEIVED". Moreover it will send an acknowledgment to the sender: this ack may or may not be
+         * received, because the network is not reliable.
+         * On the other hand, if the message can't be received by the parent, no acknowledgment will be received by the
+         * sender
          */
 
         if (message_received(recipient, src.coordinates)) {
                 ScheduleNewEvent(dst.ID, time + MESSAGE_DELIVERY_TIME, DATA_PACKET_RECEIVED, packet,
                                  sizeof(ctp_data_packet));
+
+                /*
+                 * Schedule a new event after time equal to the DATA_PACKET_ACK_OFFSET, destined to the current node, in
+                 * order to simulate that the data packet may or may not be acknowledged by the link layer of the
+                 * recipient. This is crucial because the link estimator evaluates the quality of the link to the
+                 * recipient also on the basis of acks received.
+                 */
+
+                wait_until(me,time+DATA_PACKET_ACK_OFFSET,CHECK_ACK_RECEIVED);
+        }
+        else {
+
+                /*
+                 * Parent does not received the message => the sender will receive no acknowledgment after DATA_PACKET_ACK_OFFSET
+                 * instants of time
+                 */
+
+                wait_until(me,time+DATA_PACKET_ACK_OFFSET,ACK_NOT_RECEIVED);
         }
 }
 
@@ -586,8 +820,8 @@ void unicast_event(ctp_data_packet* packet,simtime_t time) {
  * Read the configuration file in order to determine the coordinates of the nodes in the sensors netwoek and store them
  * in the dedicated list of coordinates
  *
- * NOTE: this function is executed by each logical process
- * TODO check if we can it be done only once in a thread-safe manner
+ * NOTE: this function is executed only by the root node (either the one chosen by the user with the parameter "root" or
+ * the default root)
  *
  * @path: filename of the configuration file
  *
@@ -755,8 +989,10 @@ void parse_configuration_file(const char* path){
 /*
  * IS ACK RECEIVED
  *
- * Function corresponding to the event "CHECK_ACK_RECEIVED": asks the simulator whether the node has received an ack
- * for the last data packet it sent and returns the result to the FORWARDING ENGINE
+ * The parent node has received the last data packet sent and has replied with an acknowledgment: ask the simulator
+ * whether this ack will be received by the intended recipient (i.e. the sender of the first data packet) and tell the
+ * answer to the FORWARDING ENGINE.
+ *
  *
  * @state: pointer to the object representing the current state of the node
  */
@@ -770,7 +1006,7 @@ void is_ack_received(node_state* state){
          * First get the last packet sent by the node: it's the on that occupies the head of the forwarding queue
          */
 
-        ctp_data_packet* packet=state->forwarding_queue[state->forwarding_queue_head]->data_packet;
+        ctp_data_packet* packet=&state->forwarding_queue[state->forwarding_queue_head]->packet;
 
         /*
          * Then extract the coordinates of the recipient node
@@ -856,8 +1092,10 @@ bool message_received(node_coordinates a,node_coordinates b){
          */
 
         if(!distance){
-                printf("[FATAL ERROR] Two different nodes have the same coordinates => fix the coordinates in"
+                printf("[FATAL ERROR] Two different nodes have the same coordinates => fix the coordinates in "
                                "the configuration file\n");
+                printf("distance is:%f\n",distance);
+                fflush(stdout);
                 exit(EXIT_FAILURE);
         }
 
@@ -899,22 +1137,136 @@ bool message_received(node_coordinates a,node_coordinates b){
                          * NOTE: closer neighbors have higher likelihood to receive the message
                          */
 
-                        if(distance<NEIGHBORS_MAX_DISTANCE)
+                        fflush(stdout);
+                        if(distance<NEIGHBORS_MAX_DISTANCE) {
+                                accepted_packets++;
                                 return true;
-                        else
+                        }
+                        else {
+                                discarded_packets++;
                                 return false;
+                        }
                 }
 
         }
-
 }
+
+/*
+ * ROOT RECEIVED PACKET
+ *
+ * When the root node receives a packet, the counter corresponding to the ID of the sender is incremented
+ *
+ * @packet: pointer to the packet received by the root
+ */
 
 void collected_data_packet(ctp_data_packet* packet){
-        printf("Root received packet with payload %d from node %u\n",packet->payload,packet->data_packet_frame.origin);
         collected_packets++;
         if(packet->data_packet_frame.origin)
-                collected_packets_list[packet->data_packet_frame.origin-1]+=1;
+                collected_packets_list[packet->data_packet_frame.origin]+=1;
 }
+
+/*
+ * CHECK IF FAILED
+ *
+ * Nodes can fail, so they are associated with an exponential failure distribution: this tells at every instant of time,
+ * the probability that a failure occurred and it has the form 1-e^-(lambda*t); as time goes by, failure probability
+ * increases.
+ * This function is needed by the simulation to decide whether the node is running or not at any instant of virtual
+ * time: it evaluates the failure probability, adds a random bias and returns false (node failed) if the result is
+ * bigger than or equal to the threshold "failure_threshold",true (node still running) otherwise.
+ * The random bias is introduced in order to avoid that all the nodes fail at the same time, which is not realistic and
+ * would not properly simulate failure of devices
+ *
+ * @now: actual value of the virtual clock
+ */
+
+
+bool is_failed(simtime_t now){
+
+        /*
+         * Probability of failure according to the failure distribution
+         */
+
+        double probability;
+
+        /*
+         * Make the failure event a little bit random, simulating the fact that nodes don't usually fail exactly when
+         * they are supposed to
+         */
+
+        double bias;
+
+        /*
+         * Depending on the sign of the bias applied to the probability, a node may fail earlier or later than what it
+         * was supposed to
+         */
+
+        int bias_sign;
+
+        /*
+         * Skip the check at time 0, before the node are started
+         */
+
+        if(!now)
+                return false;
+
+        /*
+         * Evaluate the probability that a failure has occurred at time "now".
+         */
+
+        probability=1-exp(-(now*failure_lambda));
+
+        /*
+         * Get a random bias in the range [-0.2,0.2]
+         */
+
+        bias=fmod(Random(),0.2);
+
+        /*
+         * Get the sign of the bias
+         */
+
+        bias_sign=RandomRange(-1,1);
+
+        /*
+         * Avoid a null bias
+         */
+
+        while(!bias_sign)
+                bias_sign=RandomRange(-1,1);
+
+        /*
+         * Apply sign to the bias
+         */
+
+        bias*=bias_sign;
+
+        /*
+         * Add a random bias
+         */
+
+        probability+=bias;
+
+        /*
+         * If the probability is beyond the failure threshold, return true, otherwise return false
+         */
+
+        if(probability>=failure_threshold) {
+                return true;
+        }
+        return false;
+}
+
+/*void print_node(unsigned int node){
+        unsigned char neighbors=get_nei
+        for (int i = 0; i < get_neigbrs; ++i) {
+
+        }
+}
+
+void print_collection_tree(){
+        print_node(ctp_root);
+}*/
 
 /* SIMULATION FUNCTIONS - end */
 

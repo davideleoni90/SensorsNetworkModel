@@ -313,7 +313,6 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
          */
 
         if(index==ROUTING_TABLE_SIZE){
-                //TODO remove an entry???
                 return;
         }
         else if(index==state->neighbors){
