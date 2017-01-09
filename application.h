@@ -27,19 +27,8 @@ enum{
         DATA_PACKET_RECEIVED=6, // The node has received a data packet
         BEACON_RECEIVED=7, // The node has received a data packet
         RETRANSMITT_DATA_PACKET=8, // Try to re-send a data packet whose first sending attempt failed
-
-        /*
-         * The last data packet sent has been delivered => after the maximum time for receiving an ack has passed, check
-         * whether it has been received or not
-         */
-
-        CHECK_ACK_RECEIVED=9,
-
-        /*
-         * The ack for the last data packet will never be received because the packet itself has not been delivered
-         */
-
-        ACK_NOT_RECEIVED=10
+        CHECK_ACK_RECEIVED=9, // Check whether the last data packet sent has been acknowledged or not
+        ACK_RECEIVED=10 // The ack for the last data packet sent has just been received
 };
 
 /*
@@ -387,7 +376,8 @@ typedef struct _node_state{
 
 void wait_until(unsigned int me,simtime_t timestamp,unsigned int type);
 void collected_data_packet(ctp_data_packet* packet);
-void broadcast_event(ctp_routing_packet* beacon,simtime_t time);
-void unicast_event(ctp_data_packet* packet,simtime_t time, unsigned int me);
+void broadcast_message(ctp_routing_packet* beacon,simtime_t time);
+void unicast_message(ctp_data_packet* packet,simtime_t time, unsigned int me);
+void send_ack(node_coordinates sender_coordinates,node recipient,simtime_t time);
 
 #endif

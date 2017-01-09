@@ -27,17 +27,14 @@
  * which is the time needed to repair the LOOP.
  */
 
-//#include "forwarding_engine.h"
-//#include "routing_engine.h"
 #include <limits.h>
 #include "application.h"
-#include "forwarding_engine.h"
-//#include "forwarding_engine.h"
-//#include "link_estimator.h"
 
-/* DECLARATIONS */
+
+/* FORWARD DECLARATIONS */
 
 void cache_remove(unsigned char offset,node_state* state);
+bool compare_packets(ctp_data_packet* a,ctp_data_packet* b);
 
 /* FORWARDING POOL - start */
 
@@ -728,7 +725,7 @@ bool send_data_packet(node_state* state) {
          * parent node reported in the physical layer frame of the packet
          */
 
-        unicast_event(&first_entry->packet,state->lvt,state->me.ID);
+        unicast_message(&first_entry->packet,state->lvt,state->me.ID);
 
         /*
          * The node is now waiting for the last data packet sent to be acknowledged => set the corresponding flag
@@ -903,17 +900,35 @@ void create_data_packet(node_state* state){
  *
  * @message: the payload from the content of the event delivered to the node
  * @state: pointer to the object representing the current state of the node
- *
- * Returns true if the packet is accepted by the node, false if it is dropped because it is duplicated
+ * @time: local value of virtual time
  */
 
-bool receive_data_packet(void* message,node_state* state) {
+void receive_data_packet(void* message,node_state* state,simtime_t time) {
 
         /*
          * Parse the buffer received to a data packet
          */
 
         ctp_data_packet* packet = (ctp_data_packet *) message;
+
+        /*
+         * Get the ID and coordinates of the recipient of the ack, i.e. sender of the message
+         */
+
+        node recipient=packet->phy_mac_overhead.src;
+
+        /*
+         * Get the coordinates of the current node, that is recipient of the message and the sender of the ack
+         */
+
+        node_coordinates sender_coordinates=packet->phy_mac_overhead.dst.coordinates;
+
+        /*
+         * First send an ack to the sender: let the simulator decides whether the ack will reach the destination,
+         * depending on the distance and on the interferences
+         */
+
+        send_ack(sender_coordinates,recipient,time);
 
         /*
          * Increment the THL, because the packet is being forwarded by the current node
@@ -932,7 +947,7 @@ bool receive_data_packet(void* message,node_state* state) {
                  * The received message has been recently sent, so this is a duplicate => drop it
                  */
 
-                return false;
+                return;
 
         }
 
@@ -950,7 +965,7 @@ bool receive_data_packet(void* message,node_state* state) {
                          * The received message is already in the output queue, so this is a duplicate => drop it
                          */
 
-                        return false;
+                        return;
 
                 }
         }
@@ -977,12 +992,6 @@ bool receive_data_packet(void* message,node_state* state) {
 
                 forward_data_packet(packet,state);
         }
-
-        /*
-         * The message has been successfully received, so return true
-         */
-
-        return true;
 }
 
 /*
@@ -1303,6 +1312,77 @@ bool is_congested(node_state* state){
         /*
          * ...false otherwise
          */
+
+        return false;
+}
+
+/*
+ * IS ACK RECEIVED
+ *
+ * This function is called when the maximum time for receiving an ack has elapsed: it checks whether the last data
+ * packet sent has already been acknowledged or not. This is determined comparing the last data packet in the output
+ * queue with the one attached to the event: if they coincide, this means that the packet has not been acknowledged,
+ * because packets are removed from the output queue if the node receives their acknowledge before the timeout
+ *
+ * @state: pointer to the object representing the current state of the node
+ * @packet: the packet to be acknowledged
+ */
+
+void is_ack_received(node_state* state,ctp_data_packet* packet){
+
+        /*
+         * First get the last packet sent by the node: it's the on that occupies the head of the forwarding queue
+         */
+
+        ctp_data_packet* last_packet=&state->forwarding_queue[state->forwarding_queue_head]->packet;
+
+        /*
+         * The boolean value that indicates whether the packet has been acknowledged or not
+         */
+
+        bool ack_received=true;
+
+        /*
+         * Check that the output queue is not empty, i.e. all the packets sent have already been acknowledged and so
+         * they have already been removed from the output queue: if so, stop
+         */
+
+        if(!last_packet)
+                return;
+
+        /*
+         * Compare the packet above with the one given as parameter to the function: if they coincide, the ack has
+         * already been received, otherwise it has not been received
+         */
+
+        if(compare_packets(last_packet,packet))
+                ack_received=false;
+
+        /*
+         * Tell the result to the FORWARDING ENGINE: it is in charge of deciding how to proceed
+         */
+
+        receive_ack(ack_received,state);
+}
+
+/*
+ * COMPARE PACKETS
+ *
+ * Returns true if all their fields coincide, false otherwise
+ *
+ * @a:pointer to the first packet
+ * @b:pointer to the other packet
+ */
+
+bool compare_packets(ctp_data_packet* a,ctp_data_packet* b){
+        if(a->payload==b->payload && a->phy_mac_overhead.dst.ID==b->phy_mac_overhead.dst.ID&&
+                a->phy_mac_overhead.src.ID==b->phy_mac_overhead.src.ID &&
+                a->data_packet_frame.ETX==b->data_packet_frame.ETX &&
+                a->data_packet_frame.origin==b->data_packet_frame.origin &&
+                a->data_packet_frame.seqNo==b->data_packet_frame.seqNo&&
+                a->data_packet_frame.THL==b->data_packet_frame.THL&&
+                a->data_packet_frame.options==b->data_packet_frame.options)
+                return true;
 
         return false;
 }

@@ -4,7 +4,6 @@ This simulation model is the result of a didactic project for the
 <a href="http://www.dis.uniroma1.it/~hpdcs/index.php?option=com_content&view=article&id=22">
 Concurrent and Parallel Programming</a> course of the Master of Science of
 Engineering in Computer Science at <a href="http://cclii.dis.uniroma1.it/?q=it/msecs">Sapienza University of Rome</a>.
-<br>
 The author of this project is <a href="https://www.linkedin.com/in/leonidavide">Davide Leoni</a>.
 </p>
 <h2>Goal and Motivations</h2>
@@ -33,9 +32,11 @@ CTP consists of three main logical software components:
 <li><i><b>Routing Engine</b></i></li>
 <li><i><b>Forwarding Engine</b></i></li>
 </ol>
+</p>
 <p align="center">
 <img src="CTP_architecture.jpeg">
 </p>
+<p align="justify">
 The above picture shows the software components of a node running the Collection Tree Protocol: arrows between components show that there's interaction between them.
 <br><br>The metric adopted in CTP for the selection of the parent node is the <i><b>ETX (Expected Transmissions)</b></i>: a node whose ETX is equal to <i>n</i> can deliver a data packet to the root node with an average of <i>n</i> transmissions.
 <br>The ETX of any node is recursively defined as the ETX of its parent plus the ETX of its link to the parent; the root node represents the base case in this recursion, and its ETX is obviously equal to 0.
@@ -60,112 +61,88 @@ This component is dedicated to the selection of the <i>parent</i> node, i.e. the
 <p align="justify">
 By mean of the Forwarding Engine, a node performs three tasks:
 <ol>
-<li>Forwards data packets received by its neighbors to the node that it has selected as parent; this, on its turn, will forward the packets to its own parent, so they will be finally delivered to the root of the collection tree</li>
-<li>Detects and tries to fix <i>routing loops</i> (two or more nodes that send packets among each other forever, in such a way that the root will never receive them).</li>
-<li>Detects and drops duplicate packets; this is achieved thanks to a cache where it stores the most recently sent data packets: before forwarding a packet, it checks whether there is one identical in the cache and, if so, drops the packet</li>
+<li align="justify">Forwards data packets received by its neighbors to the node that it has selected as parent; this, on its turn, will forward the packets to its own parent, so they will be finally delivered to the root of the collection tree</li>
+<li align="justify">Detects and tries to fix <i>routing loops</i> (two or more nodes that send packets among each other forever, in such a way that the root will never receive them).</li>
+<li align="justify">Detects and drops duplicate packets; this is achieved thanks to a cache where it stores the most recently sent data packets: before forwarding a packet, it checks whether there is one identical in the cache and, if so, drops the packet</li>
 </ol>
 </p>
 <h2>The Simulation Model</h2>
 <h3>Overview</h3>
-<p>There are many aspects that can be taken into account when developing a model of a WNS, depending on how accurate the simulation has to be. Some of them are:
+<p align="justify">There are many aspects that can be taken into account when developing a model of a WNS, depending on how accurate the simulation has to be. Some of them are:
 <ol>
-<li><b>connectivity</b> -> given a node, only some other nodes are capable of communicating with it because of the limited range of wireless connections; they are referred to as <i>neighbours</i></li>
-<li><b>interferences</b> -> wireless links are not realiable because of physical characteristics of the physical medium, that suffer from phenomena like multipath propagation.Hence, a node may not correctly receive a message sent by a neighbor node</li>
-<li><b>knowledge of the nodes</b> -> if nodes run a <i>global algorithm</i> they are full aware of the state of all the other nodes; if the algorithm is <i>distributed</i>, nodes only know a their own state when they start and they can learn about the state of their neighbours little by little by sending and receving packets.</li>
-<li><b>communication modes</b> -> nodes may be capable of sending only <i>broadcast</i> messages (received by all nodes within the range of the wireless transceiver), only <i>unicast</i> messages (received by one designed recipient) or both of them.</li>
-<li><b>latency of the network</b> -> usually there is some delay between the moment when a message is sent and the moment when it is received</li>
-<li><b>distribution of the nodes</b> -> the position of the nodes in the 2-dimensional or 3-dimensional space may be known before the simulation starts or it may be completely random</li>
-<li><b>identification of the nodes</b> -> unique identifiers (ID) may be associated to each node</li>
-<li><b>reliability of nodes</b> -> real nodes can't run forever, so they are supposed to fail after some time. Their failure may also occur earlier because they run out of power supply or a random fail occurs</li>
+<li align="justify"><b>connectivity</b> -> given a node, only some other nodes, referred to as <i>neighbours</i>, are capable of communicating with it because of the limited range of wireless connections</li>
+<li align="justify"><b>interferences</b> -> wireless links are not realiable because of characteristics of the physical medium, that suffers from phenomena like multipath propagation; links may also fail. Hence, a node may not correctly receive a message sent by a neighbor node</li>
+<li align="justify"><b>knowledge of the nodes</b> -> if nodes run a <i>global algorithm</i> they are full aware of the state of all the other nodes; if the algorithm is <i>distributed</i>, nodes only know their own state when they start and they can learn about the state of their neighbours little by little by sending and receving packets.</li>
+<li align="justify"><b>communication modes</b> -> nodes may be capable of sending only <i>broadcast</i> messages (received by all nodes within the range of the wireless transceiver), only <i>unicast</i> messages (received by one designed recipient) or both of them.</li>
+<li align="justify"><b>network latency</b> -> the time between the moment when a message is sent and the moment when it is received</li>
+<li align="justify"><b>topology of the network</b> -> the position of the nodes in the 2-dimensional or 3-dimensional space may be known before the simulation starts or it may be completely random</li>
+<li align="justify"><b>reliability of nodes</b> -> the hardware featured by nodes is supposed to work under stated conditions for a certain period of time: after this period they are likely to fail. But nodes may also fail earlier if, for instance, they run out of energy or a some external disturbance occurs</li>
 </ol>
-
-In a wireless sensors networks, each node essentially performs three tasks:
-<ol>
-<li>collection of samples from the physical world by mean of a sensor</li>
-<li>transmission of the data collected to the other nodes of the network, according to some routing protocol</li>
-<li>forwarding of data received from some nodes to other nodes of the network, according to some routing protocol</li>
-</ol>
-<b>The model proposed here is focused on the simulation of a specific routing protocol, the Collection Tree Protocol, rather than on the simulation of sensors sampling. As a consequence, data sampled from sensors are modelled as simple random values periodically produced by the nodes.
-</b>
-<br>
-<br>
-A node is modelled as one of the <i>Logical Processes (LPs)</i> created by ROOT-Sim, so it is associated with a top-level data structure (named <i>node_state</i>) that represents the state of the logical process during the simulation. Every instance of <i>node_state</i> contains the software components of the Collection Tree Protocol
+Here's how the model proposed simulates the above aspects
 </p>
-<h3>Measures Table</h3>
+<h3>Connectivity, interferences and topology</h3>
 <p align="justify">
-Every time a message is received, values of acceleration, ID of the producer and a timestamp are uploaded to a online repository: <a href="http://www.parse.com">Parse</a> was chosen as repository,
-mostly because it's free and APIs are really easy to use (they are simple REST calls). Here's a view of the dashboard from which the user can manage its custom repository
-<p align="center">
-<br><br>
-<img src="/Images/Parse.jpeg">
-</p>
-It's possible to retrieve at any moment any number of the last measures uploaded on Parse; also it is possible to clean up the table.
+The model assumes that the <b>topology of the network is know a priori, before the simulation starts, and it has to be decided by the user of the simulator</b>; only the position of the node in the bi-dimensional plane is taken into account, not in the three dimensional space.
+<br>The user only has to provide a text file containing as many rows as the number of nodes in the WSN. The syntax of each row is the following:
 </p>
 <p align="center">
-<br><br>
-<img src="/Images/MeasuresTable.jpeg">
+x,y
 </p>
-<h3>Paths Table and Graph</h3>
 <p align="justify">
-The main part of the whole application is the graphical representation of the sensors network, connected to the Paths Table. All the motes are drawn using an
-icon (as regards with producers, they have also a red circle around it) and the links among them are drawn with different colors depending on the rows selected
-in the adjacent Paths Table. Here there's one row for each producer mote, with the indication of the number of forwarders that processed the
-last message it sent (this value gets updated every time a new message from the same mote is received). Also the timestamp of the last
-message received by each producer is reported. Moreover, a link is drawn between the icon representing the mote and another icon representing the host running
-the Java application. Finally, all the links are labeled with their position within the selected path: for example, if there was a path 1->2->3->4, the link 1->2
-would have index equal to 1, the link 2->3 would have index equal to 2, and so on and so forth.
+with "x" and "y" bi-dimensional coordinates of the node.
+<br>Before the simulation actually starts, the simulator reads the list of coordinates of the nodes and stores it: from that point on, it is able to determine, for each node that sends a packet, which other nodes can receive it.
+<br>Connectivity is in fact simulated according to a variation of the <i>Quasi Unit Disk Graph (QUDG)</i> model: <b>pairs of nodes with Euclidean Distance at most <i>p</i>, for some <i>p</i> in (0,<i>q</i>], with <i>q</i>><i>p</i>, are neighbors; pairs with a distance bigger than <i>q</i> are not neighbors, while pairs with a distance in (<i>p</i>,<i>q</i>] may or many not be neighbours.</b>
+<br>In the first case, the simulator always delivers a message from the sender to the recipient, while in the second case the message will never be received.
+<br>In the last case, the message is successfully delivered with a probability directly proportional to the distance between the nodes. In particular, a value in the range [0,<i>q</i>-<i>p</i>] is randomly chosen by the simulator and added to the value of the distance: the message is delivered only if the outcome is less than <i>q</i>.
+<br>In other words, the model guarantees that <b>the closer two nodes are, the stronger is the wireless signal between them, so the better is the connectivity and the more likely is that messages sent by either of the two are successfully received.</b>
+<br><b>Interferences are represented by the random value added to the distance between the nodes because, just like interferences, it can unexpectedely prevent the communication between two nodes</b>.
 </p>
-<p align="center">
-<br><br>
-<img src="/Images/PathsTable.jpeg">
-</p>
-<p align="center">
-<br><br>
-<img src="/Images/Canvas.jpeg">
-</p>
-<h2>Final notes</h2>
+<h3>Knowledge of the nodes</h3>
 <p align="justify">
+The Collection Tree Protocol is a <b>distributed algorithm</b>: as a node starts, it is only aware of its own state and coordinates, so it sends beacons to learn about its neighbours and about the topology of the collection tree.
+<br>Nevertheless, a node has to know whether it has been chosen as the root of the collection tree or not. In the former case, in fact, it sets to 0 the value of the ETX in the beacons it sends to its neighbours, which is crucial because the ETX of the other nodes is recursively defined.
+<br>Despite each node adheres to the CTP, the simulation model requires that the Logical Process associated with the node has access to two pieces of "global" information (see "Messages" for further details):
 <ol>
-<li>the "Data Collection" module was developed and tested on TinyOs release 2.1.2</li>
-<li>the "Data visualization and storage" module depends on SDK of TinyOs release 2.1.2. As regards with the upload of data to Parse, an
-<a href="https://hc.apache.org/httpcomponents-client-4.5.x/index.html">HTTP client by Apache</a> (release 4.5) was used to make REST request;
-furthermore a <a href="https://mvnrepository.com/artifact/org.json/json">JSON library</a> was used to parse the response from Parse.</li>
+<li align="justify">the number of nodes in the network</li>
+<li align="justify">the coordinates of the other nodes</li>
 </ol>
 </p>
-<h3>Installation instructions</h3>
+<h3>Communication modes</h3>
 <p align="justify">
-In order to successfully deploy the wireless sensors network, a release of TinyOs and tool capable of reading Makefiles are mandatory.
-Also the two libraries cited above (HTTP Client and JSON library) have to be downloaded and their paths have to be included in the CLASSPATH environment variable.
-Here's the tasks to install the code into the motes:
+Nodes are modelled in such a way that they are <b>capable of sending both unicast messages and broadcast messages</b>.
+</p>
+<h3>Network latency</h3>
+<p align="justify">
+The network latency is modelled as a <b>constant offset between the moment when a node sends a packet, whatever its type</b> (data packet, beacon or ack) <b>and the moment when another node receives it</b>.
+<br>Hence the latency is independent of the distance between nodes.
+</p>
+<h3>Reliability of nodes</h3>
+<p align="justify">
+Nodes are assumed to have an <b>exponential failure distribution</b>: at time <i>t</i>, the probability that a node is failed is equal to 1-e^(-<i>lambda</i> * <i>t</i>), where <i>lambda</i> is the multiplicative inverse of the <i>failure rate</i> of the nodes.
+<br>Every time a node has to perform a step, <b>the simulator evaluates the probability of failure and adds a small random bias to it: if the result is bigger than a given threshold, the node is considered to be failed.</b>
+<br>The random bias is necessary to model the fact that nodes don't usually fail after an exact working time, because external factors may anticipate or postpone the failure.</p>
+<h2>Implementation</h2>
+<p align="justify">
+</p>
+<h3>Nodes</h3>
+<p align="justify">
+Each <i>Logical Processes (LP)</i> created by ROOT-Sim represents a node in the WSN, so this is associated with an instance of a top-level data structure named <i>node_state</i> that represents the state of the logical process during the simulation.
+<br>Its fields contain two types of information:
 <ol>
-<li><i>producers</i>: please write to me to get the nesC code necessary to control the Magonode platforms (see "Hardware implementation" above).
-Once this code is available, it's necessary to browse to the folder "Producers", open a terminal window a execute the command</li>
-<br>
-<br>
-<i>make magonode install</i>
-<br>
-<br>
-<li><i>forwarders</i>: browse to the folder "Forwarders", open a terminal window a execute the command</li>
-<br>
-<br>
-<i>make telosb install</i>
-<br>
-<br>
+<li align="justify"><b>related to the simulation</b>: the local value of the <i>Global Virtual Time(GVT)</i>, the coordinates and ID of the node, a flag describing its state (running or failed, sending a packet...) and flag that is set to true only if the node is the root of the collection tree</li>
+<li align="justify"><b>related to CTP</b>: the data structures corresponding to the three software components necessary to run the protocol (see "Collection Tree Protocol")</li>
 </ol>
-The "Makefile" given for producers, not only compiles the nesC code to drive the motes, but also generates the java class that is going to be used
-by the Java application to parse messages received by motes (SensorsDataMsg): it depends on the <a href="http://manpages.ubuntu.com/manpages/xenial/man1/mig.1.html">mig tool</a>
-to create the class. When the make file has completed its execution, the newly generated java class will be available directly inside the folder "mviz" of this project.
-Last step to perform consists in replacing the content of the "mviz" folder inside the own TinyOs release with the content of the "mviz" folder which is part of this solution
-(checking that the file "SensorsDataMsg.java" is included). At this point the Java application can be run simply executing the script "tos-mviz" (part of the TinyOs release)
-from the folder containing the file "config.properties"
-<h3>Customization</h3>
+<br>A node periodically performs two tasks:
+<ol>
+<li align="justify"><b>gathers data from its sensor(s)</b>: data are represented by integer values randomly extracted in a predefined range</li>
+<li align="justify"><b>sends a packet from its output queue</b>: either forwards a packet from another node or sends a packet containing data gathered by its own sensor(s)</li>
+</ol>
+<br><b>The ID assigned by the simulator to an LP is used to determine univocally the sender and recipient of the messages exchanged in the network</b>.
+<h3>Messages</h3>
 <p align="justify">
-This solution features two files that can be used to customize the tool, both because of specific user needs, or for a different configuration of the enviroment where
-the tool is executed or simply to test different it with different configurations:
-<ol type="1">
-<li><i>"Network.h"</i>: with this header it is possible to tune most of parameters of the sensors network, like the ID of the root mote, the frequency of sampling of the accelerometer,
-the depth of the messages queues of the motes etc.</li>
-<li><i>"config.properties"</i>: this configuration file contains path to the icons used to draw motes in the Java application, preferred size of its window etc.
-IMPORTANT!!! Also the keys to use the Parse API have to be specified: contact me to get them</li>
-</ol>
-</p>
+<b>A node <i>x</i> that sends a packet to another node <i>y</i> is simulated by the Logical Process <i>x</i> scheduling a new event having the the Logical Process <i>y</i> as recipient</b>.
+<br>Actually this holds only if the packet can be received by <i>y</i>, according to the model (see "Connectivity, interferences and position of the nodes"): if this is not the case, no event is scheduled, meaning that the packet is dropped.
+<br>More precisely, when a node sends a packet, the corresponding Logical Process ultimately calls the function <i>is_message_received</i> (see "application.c"): this is given the IDs of the sender and recipient and returns true if the packet is can be delivered, false otherwise.
+<br>The function relies on a global array where the <i>i</i>-th element contains the coordinates of the node with ID <i>i</i>.
+<br><b>The fact that such an array is available to all the LPs may seem in contrast with the above statement about the distribute nature of the Collection Tree Protocol. The contradiction can be explained by noting that nodes performs the step</b>
+<br> The model actually gives the user the chance to decide the value of <i>p</i> and <i>q</i> (but if the former parameter is given by the user, also the latter has to be provided, and vice versa).</p>

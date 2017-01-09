@@ -57,23 +57,34 @@ double failure_lambda=0.0005;
 
 double failure_threshold=0.9;
 
-/* DECLARATIONS */
-
-void parse_configuration_file(const char* path);
-void start_routing_engine(node_state* state);
-void is_ack_received(node_state* state);
-bool message_received(node_coordinates a,node_coordinates b);
-bool is_failed(simtime_t now);
-
 /*
- * Pointer to the dynamically allocated array containing the list of the the coordinates of the nodes in the network
- * (length = n_proc_tot, the number of logical processes in the simulation) indexed according to the ID of the node;
- * the coordinates of the nodes are read from a configuration file decided by the user.
+ * COORDINATES OF NODES
+ *
+ * Dynamically allocated array containing the coordinates of each node in the network (length = n_proc_tot, the number
+ * of logical processes in the simulation) indexed according to the ID; the coordinates of the nodes are read from a
+ * configuration file decided by the user.
+ *
+ * The list of coordinates comes into play when a node sends BROADCAST messages. Since the Collection Tree Protocol is
+ * a distributed algorithm, nodes initially know nothing about the number of nodes in the network, about their IDs and
+ * coordinates => the only way to learn about them is sending broadcasting beacons: those nodes that are within the
+ * area covered by the wireless link (neighbours) will learn about the position and ID of the node, and will store them
+ * in the ROUTING TABLE. In this way, they will be able to send him unicast messages in the future.
+ * When a node send beacons, it's not aware of the coordinates and IDs of the nodes in the network, so it has to ask
+ * the simulator to deliver the messages to the neighbours. The simulator keeps track of the number of nodes in the WSN,
+ * of their coordinates and IDs through the following array
  */
 
-node_coordinates* nodes_list;
+node_coordinates* nodes_coordinates_list;
 
 /* GLOBAL VARIABLES (shared among all logical processes) - end */
+
+/* FORWARD DECLARATIONS */
+
+void parse_topology(const char* path);
+void start_routing_engine(node_state* state);
+bool is_message_received(node_coordinates a,node_coordinates b);
+bool is_failed(simtime_t now);
+double euclidean_distance(node_coordinates a,node_coordinates b);
 
 /*
  * Application-level callback: this is the interface between the simulator and the model being simulated
@@ -92,8 +103,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
          */
 
         node this_node;
-
-        node_coordinates coordinates;
 
         /*
          * Index to iterate through nodes
@@ -115,43 +124,34 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                 state->lvt=now;
 
         /*
-         * First check if the node is already failed (the RUNNING flag of the state variable is not set): if so, the
-         * event can't be further processed by the logical process, so return; otherwise, go ahead.
-         * Before the simulation actually starts, no node has the running flag set but it is not failed yet, so skip
-         * the check at time 0
+         * Check if the node is just failed: if so, clear the RUNNING flag in the state field.
+         * Skip the check at time 0, when the state has not been initialized yet.
          */
 
         if(now) {
-                if(!(state->state&RUNNING))
-                        return;
-        }
+                if (state->state & RUNNING) {
+                        if (is_failed(now)) {
 
-        /*
-         * Then check if the node is now failing: if so, clear the RUNNING flag in the state variable and then return
-         */
+                                /*
+                                 * Clear RUNNING FLAG in the state object
+                                 */
 
-        if(is_failed(now)) {
+                                state->state &= ~RUNNING;
 
-                /*
-                 * Clear RUNNING FLAG
-                 */
+                                /*
+                                 * Increment by one the counter of failed nodes
+                                 */
 
-                state->state&=~RUNNING;
+                                failed_nodes++;
 
-                /*
-                 * Increment by one the counter of failed nodes
-                 */
+                                /*
+                                 * Notify the user about the failure
+                                 */
 
-                failed_nodes++;
-
-                printf("Node %d died at time %f\n",me,now);
-                fflush(stdout);
-
-                /*
-                 * Finally return
-                 */
-
-                return;
+                                printf("Node %d died at time %f\n", me, now);
+                                fflush(stdout);
+                        }
+                }
         }
 
         /*
@@ -173,8 +173,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * the memory address of the state object of processes, so it can transparently bring them back
                          * to a previous configuration in case of inconsistency problems.
                          *
-                         * Before the simulation can start, it is necessary to parse the configuration file provided
-                         * by the user, containing the coordinates of all the nodes (and possibly also the ID of the node
+                         * Before the simulation can start, it is necessary to parse the topology file provided by the
+                         * user, containing the coordinates of all the nodes (and possibly also the ID of the node
                          * chosen as root of the collection tree) => since this implies dynamic memory allocation, only
                          * one node (the one with ID 0 or the one chosen by the user) performs this task, so the actual
                          * start of the other nodes has to be deferred
@@ -207,7 +207,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         bzero(state, sizeof(node_state));
 
                         /*
-                         * Set the RUNNING flag
+                         * Set the RUNNING flag in the state object
                          */
 
                         state->state|=RUNNING;
@@ -228,8 +228,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 unsigned int root=GetParameterInt(event_content,"root");
 
                                 /*
-                                 * The user indicated the ID of the root node => check if it's valid and, if so, set the
-                                 * corresponding global value
+                                 * The user indicated the ID of the root node => check if it's valid and, if so, set
+                                 * the corresponding global value
                                  */
 
                                 if(root<n_prc_tot) {
@@ -265,17 +265,20 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         if(me==ctp_root){
 
-                                /* GET NODES OF THE SIMULATION (ONLY THE ROOT NODE) - start */
+                                /* GET TOPOLOGY OF THE NETWORK (ONLY THE ROOT NODE) - start */
 
                                 /*
-                                 * Parse the configuration file: if this is not specified, return with error
+                                 * Parse the file containing the topology of the network: if this is not specified,
+                                 * return with error
                                  */
 
-                                if(IsParameterPresent(event_content, "path")) {
-                                        parse_configuration_file(GetParameterString(event_content, "path"));
+                                if(IsParameterPresent(event_content, "topology")) {
+                                        parse_topology(GetParameterString(event_content, "topology"));
                                 }
                                 else{
-                                        printf("[FATAL ERROR] The path a to configuration file is mandatory => specify it after "
+                                        printf("[FATAL ERROR] The path a to file containing the topology of the network"
+                                                       "is mandatory => "
+                                                       "specify it after "
                                                        "the argument \"path\"\n");
                                         free((state));
                                         exit(EXIT_FAILURE);
@@ -319,13 +322,14 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          *
                          * This event comes after the INIT one =>
                          *
-                         * 1 - the global array "nodes_list" contains the coordinates of all the nodes, indexed
-                         * according to their IDs
+                         * 1 - the global array "nodes_coordinates_list" contains the coordinates of all the nodes,
+                         * indexed according to their IDs
                          * 2 - the "ctp_root" is initialized to either the ID chosen by the user for the root node or
                          * or to 0 if the user did not provide any value for parameter "root"
                          *
                          * => every node stores its coordinates in its state object and then initializes its Collection
-                         * Tree Protocol stack, which is mandatory for it to be able to communicate with the other nodes
+                         * Tree Protocol stack, which is mandatory for it to be able to communicate with the other
+                         * nodes
                          */
 
                         /*
@@ -333,7 +337,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          */
 
                         this_node.ID=me;
-                        this_node.coordinates=nodes_list[me];
+                        this_node.coordinates=nodes_coordinates_list[me];
                         state->me=this_node;
 
                         /* INIT CTP STACK - start */
@@ -374,125 +378,191 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                 case UPDATE_ROUTE_TIMER_FIRED:
 
                         /*
-                         * It's time for the ROUTING ENGINE to update the route of the node => invoke the dedicated
-                         * function.
+                         * If the node is not running, do nothing
                          */
 
-                        update_route(state);
+                        if(state->state&RUNNING) {
 
-                        /*
-                         * The time simulated through this event is periodic => schedule this event after the same amount
-                         * of time, starting from now
-                         */
+                                /*
+                                 * It's time for the ROUTING ENGINE to update the route of the node => invoke the dedicated
+                                 * function.
+                                 */
 
-                        wait_until(me,now+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
+                                update_route(state);
+
+                                /*
+                                 * The time simulated through this event is periodic => schedule this event after the same amount
+                                 * of time, starting from now
+                                 */
+
+                                wait_until(me, now + UPDATE_ROUTE_TIMER, UPDATE_ROUTE_TIMER_FIRED);
+                        }
                         break;
 
                 case SEND_BEACONS_TIMER_FIRED:
 
                         /*
-                         * It's time for the ROUTING ENGINE to send a beacon to its neighbors => before doing this,
-                         * update the route, so that information repSEND_BEACONS_TIMER_FIREDorted in the beacon will not be obsolete
+                         * If the node is not running, do nothing
                          */
 
-                        update_route(state);
+                        if(state->state&RUNNING) {
 
-                        /*
-                         * Now send the beacon
-                         */
+                                /*
+                                 * It's time for the ROUTING ENGINE to send a beacon to its neighbors => before doing this,
+                                 * update the route, so that information repSEND_BEACONS_TIMER_FIREDorted in the beacon will not be obsolete
+                                 */
 
-                        send_beacon(state);
+                                update_route(state);
 
-                        /*
-                         * The interval of the timer that schedules the sending of beacons is continuously changing, in
-                         * such a way that beacons are sent with decreasing frequency => schedule an update of the
-                         * timer, i.e. advance in the virtual time until the moment when the timer has to be updated
-                         */
+                                /*
+                                 * Now send the beacon
+                                 */
 
-                        schedule_beacons_interval_update(state);
+                                send_beacon(state);
+
+                                /*
+                                 * The interval of the timer that schedules the sending of beacons is continuously changing, in
+                                 * such a way that beacons are sent with decreasing frequency => schedule an update of the
+                                 * timer, i.e. advance in the virtual time until the moment when the timer has to be updated
+                                 */
+
+                                schedule_beacons_interval_update(state);
+                        }
                         break;
 
                 case SEND_PACKET_TIMER_FIRED:
 
                         /*
-                         * If the node is waiting for a packet to be acknowledged, keep waiting, otherwise create a new
-                         * packet and send it to the root node
+                         * If the node is not running, do nothing
                          */
 
-                        if(!(state->state&ACK_PENDING)) {
-                                create_data_packet(state);
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * If the node is waiting for a packet to be acknowledged, keep waiting, otherwise create a new
+                                 * packet and send it to the root node
+                                 */
+
+                                if (!(state->state & ACK_PENDING)) {
+                                        create_data_packet(state);
+                                }
+
+                                /*
+                                 * The time simulated through this event is periodic => schedule this event after the same amount
+                                 * of time, starting from now
+                                 */
+
+                                wait_until(me, now + SEND_PACKET_TIMER, SEND_PACKET_TIMER_FIRED);
                         }
-
-                        /*
-                         * The time simulated through this event is periodic => schedule this event after the same amount
-                         * of time, starting from now
-                         */
-
-                        wait_until(me,now+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
                         break;
 
                 case RETRANSMITT_DATA_PACKET:
 
                         /*
-                         * This event is delivered to the node in order for it to transmit again the last data packet
-                         * sent: this is due to the fact that the packet has been acknowledged by the recipient.
+                         * If the node is not running, do nothing
                          */
 
-                        send_data_packet(state);
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * This event is delivered to the node in order for it to transmit again the last data packet
+                                 * sent: this is due to the fact that the packet has been acknowledged by the recipient.
+                                 */
+
+                                send_data_packet(state);
+                        }
                         break;
 
                 case SET_BEACONS_TIMER:
 
                         /*
-                         * This event is processed when the interval associated to the timer for beacons has to be
-                         * updated
+                         * If the node is not running, do nothing
                          */
 
-                        double_beacons_send_interval(state);
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * This event is processed when the interval associated to the timer for beacons has to be
+                                 * updated
+                                 */
+
+                                double_beacons_send_interval(state);
+                        }
                         break;
 
                 case BEACON_RECEIVED:
 
                         /*
-                         * A beacon has been received => possibly update the neighbor and the routing table; the
-                         * LINK ESTIMATOR first processes the beacon and then "forwards" it to the above ROUTING LAYER
+                         * If the node is not running, do nothing
                          */
 
-                        receive_routing_packet(event_content,state);
+                        if(state->state&RUNNING) {
 
+                                /*
+                                 * A beacon has been received => possibly update the neighbor and the routing table; the
+                                 * LINK ESTIMATOR first processes the beacon and then "forwards" it to the above ROUTING LAYER
+                                 */
+
+                                receive_routing_packet(event_content, state);
+                        }
                         break;
 
                 case DATA_PACKET_RECEIVED:
 
                         /*
-                         * The node has received a data packet => let the FORWARDING ENGINE process it
+                         * If the node is not running, do nothing
                          */
 
-                        receive_data_packet((ctp_data_packet*)event_content,state);
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * The node has received a data packet => let the FORWARDING ENGINE process it and send
+                                 * an ack to the sender
+                                 */
+
+                                receive_data_packet((ctp_data_packet *) event_content, state,now);
+                        }
+                        break;
+
+                case ACK_RECEIVED:
+
+                        /*
+                         * If the node is not running, do nothing
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * The recipient of the last data packet sent has received it and has replied with an ack,
+                                 * which has been successfully delivered on its turn => signal the event to the forwarding
+                                 * engine: this will remove the last packet from the head of the output queue and will also
+                                 * inform the link estimator
+                                 */
+
+                                receive_ack(true, state);
+                        }
                         break;
 
                 case CHECK_ACK_RECEIVED:
 
                         /*
-                         * When a node sends or forwards a data packet, this is not removed from the output queue until
-                         * an acknowledgment for the packet is received.
-                         * The node does not wait the acknowledgement forever, but just for a timeout time => this event
-                         * is processed by a node, when the timeout time has elapsed, in order to check whether the ack
-                         * has been received for not.
-                         * The fact that an acknowledgment has been received or not is, again, determined by the function
-                         * "message_received"
+                         * If the node is not running, do nothing
                          */
 
-                        is_ack_received(state);
-                        break;
+                        if(state->state&RUNNING) {
 
-                case ACK_NOT_RECEIVED:
+                                /*
+                                 * When a node sends or forwards a data packet, this is not removed from the output
+                                 * queue until an acknowledgment for the packet is received.
+                                 * The node does not wait the acknowledgement forever, but just for a timeout time =>
+                                 * this event is processed by a node, when the timeout time has elapsed, in order to
+                                 * check whether the ack has been received for not.
+                                 * The fact that an acknowledgment has been received or not is determined comparing the
+                                 * last data packet in the output queue with the one attached to the event
+                                 */
 
-                        /*
-                         * The parent node did not receive the last data packet sent => tell this to the node
-                         */
-
-                        receive_ack(false,state);
+                                is_ack_received(state, (ctp_data_packet *) event_content);
+                        }
                         break;
 
                 default:
@@ -531,14 +601,14 @@ bool OnGVT(unsigned int me, void*snapshot) {
         int i=0;
 
         /*
-         * If the current node is the root of the collection tree, check that there are still some node alive and
+         * If the current node is the root of the collection tree, check that there are still some nodes alive and
          * also check the number of data packets received
          */
 
         if(((node_state*)snapshot)->root){
 
                 /*
-                 * First check if the root is still alive: if so, terminate the simulation
+                 * First check if the root is still alive: if not, terminate the simulation
                  */
 
                 if(!(((node_state*)snapshot)->state&RUNNING))
@@ -689,7 +759,7 @@ void wait_until(unsigned int me,simtime_t timestamp,unsigned int type){
  * @time: virtual time when the message should be delivered
  */
 
-void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
+void broadcast_message(ctp_routing_packet* beacon,simtime_t time) {
 
         /*
          * Index used to iterate through nodes of the network
@@ -714,7 +784,13 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
                  * Coordinates of the current node
                  */
 
-                node_coordinates recipient;
+                node_coordinates recipient_coordinates;
+
+                /*
+                 * State of the current node
+                 */
+
+                unsigned int recipient_state;
 
                 /*
                  * Skip the sender of the message
@@ -727,15 +803,15 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
                  * Get coordinates of the current node from the dedicated list
                  */
 
-                recipient = nodes_list[i];
+                recipient_coordinates = nodes_coordinates_list[i];
 
                 /*
                  * If the message can be received by the neighbor, according to the simulator, it will process an event
-                 * of type "BEACON_RECEIVED"
+                 * of type "BEACON_RECEIVED" (unless it fails before)
                  */
 
 
-                if (message_received(src.coordinates, recipient)) {
+                if (is_message_received(src.coordinates, recipient_coordinates)) {
                         ScheduleNewEvent(i, time + MESSAGE_DELIVERY_TIME, BEACON_RECEIVED, beacon,
                                          sizeof(ctp_routing_packet));
                 }
@@ -743,22 +819,23 @@ void broadcast_event(ctp_routing_packet* beacon,simtime_t time) {
 }
 
 /*
- * UNICAST EVENT
+ * UNICAST MESSAGE
  *
- * Function invoked by the node, in particular, by its FORWARDING ENGINE, when it has to a data packet to its parent.
+ * Function invoked by the node, in particular, by its FORWARDING ENGINE, when it has to a data packet to its parent or
+ * an acknowledgment to one of its children
  *
- * @packet: the message to be sent
- * @time: virtual time when the message should be delivered
+ * @packet: the message to be sent (NULL in case of ack)
+ * @time: virtual time of the node
  * @me: ID of the sender
  */
 
-void unicast_event(ctp_data_packet* packet,simtime_t time, unsigned int me) {
+void unicast_message(ctp_data_packet* packet,simtime_t time, unsigned int me) {
 
         /*
          * Coordinates of the parent node
          */
 
-        node_coordinates recipient;
+        node_coordinates recipient_coordinates;
 
         /*
          * Get the sender node: it's identity is reported in the physical overhead of the given packet
@@ -776,37 +853,51 @@ void unicast_event(ctp_data_packet* packet,simtime_t time, unsigned int me) {
          * Get coordinates of the current node from the dedicated list
          */
 
-        recipient = nodes_list[dst.ID];
+        recipient_coordinates = dst.coordinates;
 
         /*
-         * If the message can be received by the parent, according to the simulator, it will process an event of type
-         * "DATA_PACKET_RECEIVED". Moreover it will send an acknowledgment to the sender: this ack may or may not be
-         * received, because the network is not reliable.
-         * On the other hand, if the message can't be received by the parent, no acknowledgment will be received by the
-         * sender
+         * If the message can be received by the parent according to the simulator, it will be delivered an event of type
+         * "DATA_PACKET_RECEIVED"
          */
 
-        if (message_received(recipient, src.coordinates)) {
+        if (is_message_received(src.coordinates,recipient_coordinates)) {
                 ScheduleNewEvent(dst.ID, time + MESSAGE_DELIVERY_TIME, DATA_PACKET_RECEIVED, packet,
                                  sizeof(ctp_data_packet));
-
-                /*
-                 * Schedule a new event after time equal to the DATA_PACKET_ACK_OFFSET, destined to the current node, in
-                 * order to simulate that the data packet may or may not be acknowledged by the link layer of the
-                 * recipient. This is crucial because the link estimator evaluates the quality of the link to the
-                 * recipient also on the basis of acks received.
-                 */
-
-                wait_until(me,time+DATA_PACKET_ACK_OFFSET,CHECK_ACK_RECEIVED);
         }
-        else {
 
-                /*
-                 * Parent does not received the message => the sender will receive no acknowledgment after DATA_PACKET_ACK_OFFSET
-                 * instants of time
-                 */
+        /*
+         * Start a timer that will be fired after the maximum time for receiving an acknowledgment: at that moment, the
+         * packet might have been already acknowledged or not, and this information is crucial to evaluate the outgoing
+         * quality of the link to the parent. In order to check whether the ack has been received before the timeout,
+         * the node compares the last packet in the output queue with the one provided with the event below: if they
+         * are different, the packet has already been acknowledged before the timeout, otherwise the packet has not
+         * been acknowledged.
+         */
 
-                wait_until(me,time+DATA_PACKET_ACK_OFFSET,ACK_NOT_RECEIVED);
+        ScheduleNewEvent(me,time+ACK_TIMEOUT_OFFSET,CHECK_ACK_RECEIVED,packet,sizeof(ctp_data_packet));
+}
+
+/*
+ * SEND ACKNOWLEDGMENT
+ *
+ * After a node has successfully received a data packet, it replies with an acknowledgment: this may or may not be
+ * received, depending on the interferences affecting the network. In the former case, the recipient of the ack is
+ * delivered an event of type "ACK_RECEIVED"
+ *
+ * @sender_coordinates: coordinates of the node that is sending the ack
+ * @recipient: the structure representing the node that is waiting for the ack
+ * @time: virtual time of the node
+ */
+
+void send_ack(node_coordinates sender_coordinates,node recipient,simtime_t time){
+
+        /*
+         * If the ack is received, according to the simulator, schedule a new event of type "ACK_RECEIVED" for the
+         * recipient
+         */
+
+        if (is_message_received(sender_coordinates,recipient.coordinates)) {
+                ScheduleNewEvent(recipient.ID, time + MESSAGE_DELIVERY_TIME, ACK_RECEIVED, NULL,0);
         }
 }
 
@@ -815,24 +906,24 @@ void unicast_event(ctp_data_packet* packet,simtime_t time, unsigned int me) {
 /* SIMULATION FUNCTIONS - start */
 
 /*
- * PARSE CONFIGURATION FILE
+ * PARSE FILE CONTAINING THE TOPOLOGY OF THE NETWORK
  *
- * Read the configuration file in order to determine the coordinates of the nodes in the sensors netwoek and store them
- * in the dedicated list of coordinates
+ * Read the file in order to determine the coordinates of the nodes in the sensors network; then store them in the
+ * array "nodes_coordinates_list"
  *
  * NOTE: this function is executed only by the root node (either the one chosen by the user with the parameter "root" or
  * the default root)
  *
- * @path: filename of the configuration file
+ * @path: filename of the file containing the topology of the network
  *
- * NOTE: THE CONFIGURATION FILE HAS TO BE IN THE SAME DIRECTORY AS THE MODEL BEING RUN
+ * NOTE: THE FILE HAS TO BE IN THE SAME DIRECTORY AS THE MODEL BEING RUN
  */
 
-void parse_configuration_file(const char* path){
+void parse_topology(const char* path){
 
         /*
-         * Number of current line in the configuration file; this is also used to check that the configuration file
-         * contains the coordinates for all the nodes of the simulation
+         * Number of current line in the configuration file; this is also used to check that the file contains the
+         * coordinates for all the nodes of the simulation
          */
 
         unsigned int lines=0;
@@ -846,7 +937,7 @@ void parse_configuration_file(const char* path){
         char * lineptr=NULL;
 
         /*
-         * Get the configuration file object in READ_ONLY mode
+         * Get the file object in READ_ONLY mode
          */
 
         file=fopen(path,"r");
@@ -856,21 +947,21 @@ void parse_configuration_file(const char* path){
          */
 
         if(!file){
-                printf("[FATAL ERROR] Provided path doesn't correspond to any configuration file or it cannot be "
+                printf("[FATAL ERROR] Provided path doesn't correspond to any file or it cannot be "
                                "accessed\n");
                 exit(EXIT_FAILURE);
         }
 
         /*
-         * The path is valid => allocate a new array of "node_coordinates" with a number of elements equal to the number
-         * of logical processes; we use reallocation instead of allocation in order not to waste memory possibly
-         * allocated by other logical processes other than the current one
+         * The path is valid => allocate a new array of "public_node_state" with a number of elements equal to the
+         * number of LPs
          */
 
-        nodes_list=malloc(sizeof(node_coordinates)*n_prc_tot);
+        nodes_coordinates_list=malloc(sizeof(node_coordinates)*n_prc_tot);
 
         /*
-         * Now read the file line by line and store the coordinates at line "i"at index "i" of the list
+         * Now read the file line by line and store the coordinates at line "i" at index "i" of the list; also
+         * initialize the state of each element
          */
 
         while(getline(&lineptr,&len,file)!=-1){
@@ -911,8 +1002,8 @@ void parse_configuration_file(const char* path){
                  */
 
                 if(!x_coordinate) {
-                        printf("[FATAL ERROR] Line %i of the configuration file is not well formed\n", lines);
-                        free(nodes_list);
+                        printf("[FATAL ERROR] Line %i of the file with the topology is not well formed\n", lines);
+                        free(nodes_coordinates_list);
                         free(lineptr);
                         fclose(file);
                         exit(EXIT_FAILURE);
@@ -935,8 +1026,8 @@ void parse_configuration_file(const char* path){
                  */
 
                 if(!y_coordinate) {
-                        printf("[FATAL ERROR] Line %i of the configuration file is not well formed\n", lines);
-                        free(nodes_list);
+                        printf("[FATAL ERROR] Line %i of the file with the topology is not well formed\n", lines);
+                        free(nodes_coordinates_list);
                         free(lineptr);
                         fclose(file);
                         exit(EXIT_FAILURE);
@@ -952,7 +1043,7 @@ void parse_configuration_file(const char* path){
                  * The coordinates were correctly specified => store them in the list
                  */
 
-                nodes_list[lines]=node_coordinates;
+                nodes_coordinates_list[lines]=node_coordinates;
 
                 /*
                  * Increment the counter for lines read
@@ -980,85 +1071,18 @@ void parse_configuration_file(const char* path){
          */
 
         if(lines<n_prc_tot) {
-                printf("[FATAL ERROR] Missing coordinates for %d node(s) in the configuration file\n",n_prc_tot-lines);
-                free(nodes_list);
+                printf("[FATAL ERROR] Missing coordinates for %d node(s) in the file with the topology\n",
+                       n_prc_tot-lines);
+                free(nodes_coordinates_list);
                 exit(EXIT_FAILURE);
         }
-}
-
-/*
- * IS ACK RECEIVED
- *
- * The parent node has received the last data packet sent and has replied with an acknowledgment: ask the simulator
- * whether this ack will be received by the intended recipient (i.e. the sender of the first data packet) and tell the
- * answer to the FORWARDING ENGINE.
- *
- *
- * @state: pointer to the object representing the current state of the node
- */
-
-void is_ack_received(node_state* state){
-
-        //printf("checking if node %d received ack for packet with payload %d\n", state->me.ID,
-               //state->forwarding_queue[state->forwarding_queue_head]->data_packet->payload);
-
-        /*
-         * First get the last packet sent by the node: it's the on that occupies the head of the forwarding queue
-         */
-
-        ctp_data_packet* packet=&state->forwarding_queue[state->forwarding_queue_head]->packet;
-
-        /*
-         * Then extract the coordinates of the recipient node
-         */
-
-        node_coordinates recipient=packet->phy_mac_overhead.dst.coordinates;
-
-        /*
-         * Now ask the simulator whether the ask is received or not
-         */
-
-        bool ack_received=message_received(state->me.coordinates,recipient);
-
-        /*
-         * Tell the result to the FORWARDING ENGINE: it is in charge of deciding how to proceed
-         */
-
-        receive_ack(ack_received,state);
-}
-
-/*
- * EUCLIDEAN DISTANCE
- *
- * Return the euclidean distance between given nodes
- */
-
-double euclidean_distance(node_coordinates a,node_coordinates b){
-
-        /*
-         * Difference between x coordinates of the nodes
-         */
-
-        int x_difference=a.x-b.x;
-
-        /*
-         * Difference between y coordinates of the nodes
-         */
-
-        int y_difference=a.y-b.y;
-
-        /*
-         * Return euclidean distance
-         */
-
-        return sqrt(x_difference*x_difference+y_difference*y_difference);
 }
 
 /*
  * CAN RECEIVE MESSAGE?
  *
  * This function determines, given the coordinates of two nodes, whether or not a message sent by one of the two is
- * received by the other one, and viceversa.
+ * received by the other one, and vice versa.
  *
  * In fact this models takes into account the fact that radio transceiver of sensor nodes has a limited coverage =>
  * a broadcast message will be received only by those nodes whose distance from the sender is within a certain bound.
@@ -1070,15 +1094,15 @@ double euclidean_distance(node_coordinates a,node_coordinates b){
  * by A to B and by B to A are certainly delivered.
  * If their distance is in the range (p,r], messages sent by A to B and by B to A may or may not be delivered
  * => for two such nodes this function may return different values every time it is executed; anyway, the closer the two
- * nodes, the more likely that messages are delivered
+ * nodes, the more likely that messages are delivered.
  *
- * @a: coordinates of a node
- * @b: coordinates of the other node
+ * @a: coordinates of the sender
+ * @b: coordinates of the recipient
  *
  * Returns true if a message sent by one of the two nodes can be received by the other one, false otherwise
  */
 
-bool message_received(node_coordinates a,node_coordinates b){
+bool is_message_received(node_coordinates a,node_coordinates b){
 
         /*
          * Get the euclidean distance between the nodes
@@ -1149,20 +1173,6 @@ bool message_received(node_coordinates a,node_coordinates b){
                 }
 
         }
-}
-
-/*
- * ROOT RECEIVED PACKET
- *
- * When the root node receives a packet, the counter corresponding to the ID of the sender is incremented
- *
- * @packet: pointer to the packet received by the root
- */
-
-void collected_data_packet(ctp_data_packet* packet){
-        collected_packets++;
-        if(packet->data_packet_frame.origin)
-                collected_packets_list[packet->data_packet_frame.origin]+=1;
 }
 
 /*
@@ -1257,16 +1267,46 @@ bool is_failed(simtime_t now){
         return false;
 }
 
-/*void print_node(unsigned int node){
-        unsigned char neighbors=get_nei
-        for (int i = 0; i < get_neigbrs; ++i) {
+/*
+ * EUCLIDEAN DISTANCE
+ *
+ * Return the euclidean distance between given nodes
+ */
 
-        }
+double euclidean_distance(node_coordinates a,node_coordinates b){
+
+        /*
+         * Difference between x coordinates of the nodes
+         */
+
+        int x_difference=a.x-b.x;
+
+        /*
+         * Difference between y coordinates of the nodes
+         */
+
+        int y_difference=a.y-b.y;
+
+        /*
+         * Return euclidean distance
+         */
+
+        return sqrt(x_difference*x_difference+y_difference*y_difference);
 }
 
-void print_collection_tree(){
-        print_node(ctp_root);
-}*/
+/*
+ * ROOT RECEIVED PACKET
+ *
+ * When the root node receives a packet, the counter corresponding to the ID of the sender is incremented
+ *
+ * @packet: pointer to the packet received by the root
+ */
+
+void collected_data_packet(ctp_data_packet* packet){
+        collected_packets++;
+        if(packet->data_packet_frame.origin)
+                collected_packets_list[packet->data_packet_frame.origin]+=1;
+}
 
 /* SIMULATION FUNCTIONS - end */
 

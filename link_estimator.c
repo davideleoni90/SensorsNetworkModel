@@ -866,7 +866,7 @@ void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequenc
          * new broadcast event
          */
 
-        broadcast_event(beacon,now);
+        broadcast_message(beacon,now);
 }
 
 /*
