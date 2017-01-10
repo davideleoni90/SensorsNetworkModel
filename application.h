@@ -185,10 +185,28 @@ typedef struct _routing_table_entry{
  *
  * Structure representing the state of a node (logic process) at any point in the virtual time.
  * Its main data structures are those related to the stack of the Collection Tree Protocol, i.e. the Link Estimator, the
- * Routing Engine and the Forwarding Engine
+ * Routing Engine and the Forwarding Engine; also it contains the data structure related to the Link layer
  */
 
 typedef struct _node_state{
+
+        /* LINK LAYER FIELDS - start */
+
+        unsigned char backoff_count; // Number of times the node experience a collision on the channel
+
+        /*
+         * Number of times that the channel has to be detected as free by the node before it starts transmitting
+         */
+
+        unsigned char free_channel_count;
+
+        /*
+         * Pointer to the packet being sent: if not null, the link layers drops packets from upper layers
+         */
+
+        ctp_data_packet* link_layer_sending;
+
+        /* LINK LAYER FIELDS - end */
 
         /* LINK ESTIMATOR FIELDS - start */
 
