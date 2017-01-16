@@ -22,10 +22,7 @@
  */
 
 #include <ROOT-Sim.h>
-#include <limits.h>
 #include "application.h"
-
-//TODO node_running
 
 /*
  * Method to initialize a variable describing a path from one node to the root: simply sets all the fields to  their
@@ -36,7 +33,7 @@
 
 void init_route_info(node_state* state) {
         if(state->root)
-                state->route.parent=state->me.ID;
+                state->route.parent=state->me;
         else
                 state->route.parent= INVALID_ADDRESS;
         state->route.etx = 0;
@@ -69,6 +66,24 @@ void start_routing_engine(node_state* state){
         state->neighbors=0;
 
         /*
+         * Set the initial number of parent changes to 0
+         */
+
+        state->parent_changes=0;
+
+        /*
+         * Clear the "sending" flag because the node is not sending any beacon yet
+         */
+
+        state->sending_beacon=false;
+
+        /*
+         * Set the "type" field of the link layer frame in the routing packet to CTP_BEACON
+         */
+
+        state->routing_packet.link_frame.type=CTP_BEACON;
+
+        /*
          * Initialize the route from this node to the root of the collection tree
          */
 
@@ -78,11 +93,13 @@ void start_routing_engine(node_state* state){
          * Start the periodic timer with interval UPDATE_ROUTE_TIMER: every time is fired, the route is updated.
          * The simulator is in charge of re-setting the timer every time it is fired
          * The route of the root node is set when the CTP stack is initialized and does not obviously changes anymore
-         * => the root node it not notified this event
+         * => the root node it not notified this event.
+         * The interval has to be first converted from milli-seconds and then from seconds to simulation ticks (virtual
+         * time)
          */
 
         if(!state->root)
-                wait_until(state->me.ID,state->lvt+UPDATE_ROUTE_TIMER,UPDATE_ROUTE_TIMER_FIRED);
+                wait_until(state->me,state->lvt+((UPDATE_ROUTE_TIMER/1000)*TICKS_PER_SEC),UPDATE_ROUTE_TIMER_FIRED);
 
         /*
          * Start the periodic timer for sending beacons: the interval is BEACON_MIN_INTERVAL at first, and is increased
@@ -390,7 +407,7 @@ void update_route(node_state* state){
         unsigned char i;
 
         /*
-         * Pointer to the rooute of the current node
+         * Pointer to the route of the current node
          */
 
         route_info* route;
@@ -476,10 +493,10 @@ void update_route(node_state* state){
 
                 /*
                  * Skip entries whose "parent" field is not valid or is set to the the same ID as the one of the
-                 * current node (in order to avoid loops)
+                 * current node, i.e. child nodes (in order to avoid loops)
                  */
 
-                if((current_entry->info.parent==INVALID_ADDRESS) || (current_entry->info.parent==state->me.ID))
+                if((current_entry->info.parent==INVALID_ADDRESS) || (current_entry->info.parent==state->me))
                         continue;
 
                 /*
@@ -625,10 +642,24 @@ void update_route(node_state* state){
                         route->etx=best_entry->info.etx;
 
                         /*
-                         * Finally copy the "congested" flag from the new parent
+                         * Copy the "congested" flag from the new parent
                          */
 
                         route->congested=best_entry->info.congested;
+
+                        /*
+                         * If the difference between the old parent and the new one is bigger than two hops (ETX=20),
+                         * trigger a route update
+                         */
+
+                        if(actual_etx-min_etx>20)
+                                reset_beacon_interval(state);
+
+                        /*
+                         * Finally, increment by one the number of parent changes (for statistics)
+                         */
+
+                        state->parent_changes+=1;
                 }
         }
 }
@@ -677,10 +708,10 @@ void set_beacon_sending_time(node_state* state){
         state->beacon_sending_time=beacon_sending_time;
 
         /*
-         * Schedule the sending of the next beacon at the chosen sending time
+         * Schedule the sending of the next beacon at the chosen sending time (in simulation ticks)
          */
 
-        wait_until(state->me.ID,state->lvt+beacon_sending_time,SEND_BEACONS_TIMER_FIRED);
+        wait_until(state->me,state->lvt+((beacon_sending_time/1000)*TICKS_PER_SEC),SEND_BEACONS_TIMER_FIRED);
 }
 
 
@@ -730,7 +761,7 @@ void schedule_beacons_interval_update(node_state* state){
          * Request an event scheduled at the time in the future when the update will have to be performed
          */
 
-        wait_until(state->me.ID,state->lvt+remaining,SET_BEACONS_TIMER);
+        wait_until(state->me,state->lvt+((remaining/1000)*TICKS_PER_SEC),SET_BEACONS_TIMER);
 }
 
 /*
@@ -793,6 +824,13 @@ void send_beacon(node_state* state){
         ctp_routing_frame* routing_frame=&routing_packet->routing_frame;
 
         /*
+         * Check if another beacon transmission is already ongoing: if so, drop the new beacon
+         */
+
+        if(state->sending_beacon)
+                return;
+
+        /*
          * Default value for the options flag is 0
          */
 
@@ -800,11 +838,13 @@ void send_beacon(node_state* state){
 
         /*
          * Ask the FORWARDING ENGINE whether the parent is congested: if so, set the corresponding flag in the routing
-         * frame of the beacon being sent
+         * frame of the beacon being sent, otherwise make sure the flag is cleared
          */
 
         if(is_congested(state))
                 routing_frame->options|=CTP_CONGESTED;
+        else
+                routing_frame->options&=~CTP_CONGESTED;
 
         /*
          * Set the current parent in the corresponding field of the routing frame
@@ -842,10 +882,21 @@ void send_beacon(node_state* state){
 
         /*
          * At this point the beacon is ready to be sent as broadcast message. The routing layer relies on the link
-         * estimator for this service
+         * estimator for this service: the former has to ask the latter to verify whether the beacon can be sent now.
+         * For example, if the radio is busy transmitting another beacon, the new beacon can't be immediately sent, so
+         * the routing engine has to wait
          */
 
-        send_routing_packet(routing_packet,state->beacon_sequence_number, state->me, state->lvt);
+        if(send_routing_packet(state)){
+
+                /*
+                 * The beacon can be sent now, so set the corresponding guard variable to avoid concurrent accesses to
+                 * the beacon
+                 */
+
+                state->sending_beacon=true;
+
+        }
 
         /*
          * Update the beacon sequence number
@@ -861,11 +912,11 @@ void send_beacon(node_state* state){
  * TABLE has to be updated
  *
  * @routing_frame: the routing frame extracted from the beacon
- * @from: ID and coordinates of the node that sent the message
+ * @from: ID of the node that sent the message
  * @state: pointer to the object representing the current state of the node
  */
 
-void receive_beacon(ctp_routing_frame* routing_frame, node from,node_state*state){
+void receive_beacon(ctp_routing_frame* routing_frame, unsigned int from,node_state*state){
 
         /*
          * Flag indicating that the sender is congested
@@ -900,22 +951,30 @@ void receive_beacon(ctp_routing_frame* routing_frame, node from,node_state*state
                  */
 
                 if(!routing_frame->ETX){
-                        insert_neighbor(from,neighbors_table);
-                        pin_neighbor(from.ID,neighbors_table);
+
+                        /*
+                         * If a node is removed from the estimator table to store the root, inform the ROUTING ENGINE
+                         * about this
+                         */
+
+                        int node_removed=insert_neighbor(from,neighbors_table);
+                        if(node_removed!=-1)
+                                neighbor_evicted((unsigned int)node_removed,state);
+                        pin_neighbor(from,neighbors_table);
                 }
 
                 /*
                  * Update the ROUTING TABLE using info contained in the beacon
                  */
 
-                update_routing_table(from.ID,routing_frame->parent,routing_frame->ETX,state);
+                update_routing_table(from,routing_frame->parent,routing_frame->ETX,state);
 
                 /*
                  * Update the "congested" flag to the value reported in the beacon.
                  * Possibly update the route
                  */
 
-                update_neighbor_congested(from.ID,state,congested);
+                update_neighbor_congested(from,state,congested);
         }
 
         /*
@@ -1123,25 +1182,19 @@ bool get_etx(unsigned short* etx,node_state* state){
  * @state: pointer to the object representing the current state of the node
  */
 
-node get_parent(node_state* state){
+unsigned int get_parent(node_state* state){
 
         /*
-         * The "node" object returned
+         * The ID returned
          */
 
-        node parent;
+        unsigned int parent;
 
         /*
          * Get the parent ID
          */
 
-        parent.ID=state->route.parent;
-
-        /*
-         * Ask the link estimator for coordinates of the parent
-         */
-
-        get_parent_coordinates(&parent,state->link_estimator_table);
+        parent=state->route.parent;
 
         /*
          * Return the parent

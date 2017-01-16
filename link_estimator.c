@@ -20,6 +20,7 @@
 #include <limits.h>
 #include "link_estimator.h"
 #include "application.h"
+#include "link_layer.h"
 
 /*
  * LINK ESTIMATOR TABLE OPERATIONS - start
@@ -30,12 +31,12 @@
  *
  * Initialize the entry in the estimator table for the neighbor with the given ID at the given position
  *
- * @neighbor: ID and coordinates of the neighbor the entry is being created for
+ * @neighbor: ID of the neighbor the entry is being created for
  * @index: position occupied by the new entry in the table
  * @link_estimator_table: pointer to the link estimator table of the node
  */
 
-void init_estimator_entry(node neighbor, unsigned char index,link_estimator_table_entry* link_estimator_table){
+void init_estimator_entry(unsigned int neighbor, unsigned char index,link_estimator_table_entry* link_estimator_table){
 
         /*
          * Pointer to the index-th element of the table
@@ -110,7 +111,7 @@ unsigned char find_estimator_entry(unsigned int neighbor,link_estimator_table_en
                          * Check if the current entry is the one we are looking for
                          */
 
-                        if(link_estimator_table[index].neighbor.ID==neighbor) {
+                        if(link_estimator_table[index].neighbor==neighbor) {
 
                                 /*
                                  * Return the index of the entry corresponding to the neighbor
@@ -409,8 +410,8 @@ unsigned char find_estimator_free_entry(link_estimator_table_entry* link_estimat
 /*
  * INITIALIZE NEIGHBORS TABLE
  *
- * Set the address field of the entries in the neighbor table to "UINT_MAX", otherwise there will always be an entry dedicated
- * to node 0 even before it sends any beacon; also set the "option" flag to 0
+ * Set the address field of the entries in the neighbor table to "UINT_MAX", otherwise there will always be an entry
+ * dedicated to node 0 even before it sends any beacon; also set the "option" flag to 0
  *
  * @link_estimator_table: the link estimator table
  */
@@ -429,7 +430,7 @@ void init_link_estimator_table(link_estimator_table_entry* link_estimator_table)
 
         for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
                 link_estimator_table[i].flags=0;
-                link_estimator_table[i].neighbor.ID=UINT_MAX-1;
+                link_estimator_table[i].neighbor=UINT_MAX-1;
         }
 }
 
@@ -442,11 +443,13 @@ void init_link_estimator_table(link_estimator_table_entry* link_estimator_table)
  *
  * The function checks whether the entry exists and, if not, tries to create one
  *
- * @neighbor: ID and coordinates of the neighbor the entry has to be created for
+ * @neighbor: ID of the neighbor the entry has to be created for
  * @link_estimator_table: pointer to the link estimator table of the node
+ *
+ * Returns the ID of the node corresponding to an entry removed (if any), -1 otherwise
  */
 
-void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_table){
+int insert_neighbor(unsigned int neighbor,link_estimator_table_entry* link_estimator_table){
 
         /*
          * Index of the entry in the estimator table that matches the addres (if any)
@@ -458,7 +461,7 @@ void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_ta
          * Search the estimator table for an entry with the given address
          */
 
-        index=find_estimator_entry(neighbor.ID,link_estimator_table);
+        index=find_estimator_entry(neighbor,link_estimator_table);
 
         /*
          * Check result of the query: if no entry matches the given ID, a new entry has to be created for it
@@ -498,7 +501,7 @@ void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_ta
                          * Check if a victim node has been found
                          *
                          * NOTE: At this point we are almost sure that a victim has been found, because the threshold
-                         * is ver tight
+                         * is very tight
                          */
 
                         if(index!=INVALID_ENTRY){
@@ -509,9 +512,21 @@ void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_ta
 
                                 init_estimator_entry(neighbor,index,link_estimator_table);
 
+                                /*
+                                 * An entry has been removed from the neighbor table => return the ID of the
+                                 * corresponding node
+                                 */
+
+                                return link_estimator_table[index].neighbor;
                         }
                 }
         }
+
+        /*
+         * No entry has been removed from the table
+         */
+
+        return -1;
 }
 
 /*
@@ -573,54 +588,6 @@ unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* 
          */
 
         return VERY_LARGE_ETX_VALUE;
-}
-
-/*
- * GET PARENT COORDINATES
- *
- * Function used by the routing engine to get the coordinates of the neighbor that is currently selected as parent of
- * the current node; returns "NULL" if the given parent ID is not valid
- *
- * @parent: pointer to the structure representing the parent node
- * @link_estimator_table: pointer to the link estimator table of the node
- */
-
-void get_parent_coordinates(node* parent,link_estimator_table_entry* link_estimator_table){
-
-        /*
-         * Index of the entry in the estimator table corresponding to the parent
-         */
-
-        unsigned char index;
-
-        /*
-         * Get the index
-         */
-
-        index=find_estimator_entry(parent->ID,link_estimator_table);
-
-        /*
-         * Check that the entry matching the given parent ID exists
-         */
-
-        if(index==INVALID_ADDRESS) {
-
-                /*
-                 * The given ID is unknown to the link estimator => set both coordinates to INT_MAX in order to signal
-                 * error
-                 */
-
-                parent->coordinates.x = INT_MAX;
-                parent->coordinates.y = INT_MAX;
-        }
-
-        /*
-         * The given ID has a corresponding entry in the estimator table => initialize the pointer to the coordinates
-         * of the node in the entry
-         */
-
-        parent->coordinates.x=link_estimator_table[index].neighbor.coordinates.x;
-        parent->coordinates.y=link_estimator_table[index].neighbor.coordinates.y;
 }
 
 /*
@@ -795,20 +762,12 @@ bool clear_data_link_quality(unsigned int address,link_estimator_table_entry* li
  * Set the fields of the link estimator frame and combine this with the given routing frame => the resulting beacon is
  * sent to the other nodes by scheduling a new simulator event.
  *
- * @routing_frame: pointer to the routing frame, initialized by the routing engine, of the routing packet to send
- * @link_estimator_table: pointer to the link estimator table of the node
- * @beacon_sequence: sequence number of the last beacon sent
- * @me: ID and coordinates of the sender
- * @now: current value of local virtual time
+ * @state: pointer to the object representing the current state of the node
+ *
+ * Returns true if the beacon is successfully sent, false otherwise
  */
 
-void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequence,node me,simtime_t now){
-
-        /*
-         * Pointer to the physical and data link frame of the beacon that is being sent
-         */
-
-        physical_datalink_overhead* phy_mac_overhead;
+bool send_routing_packet(node_state* state){
 
         /*
          * Pointer to the link estimator frame of the beacon that is being sent
@@ -817,56 +776,30 @@ void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequenc
         ctp_link_estimator_frame* link_estimator_frame;
 
         /*
-         * Coordinates of the recipient: since it's a broadcast message, set it to 0,0
+         * The ID of the recipient is the address for broadcast transmissions
          */
 
-        node_coordinates coordinates={0,0};
-
-        /*
-         * Structure representing the recipient
-         */
-
-        node recipient={BROADCAST_ADDRESS,coordinates};
-
-        /*
-         * Extract the physical and data link frame from the given beacon
-         */
-
-        phy_mac_overhead=&beacon->phy_mac_overhead;
-
-        /*
-         * Set the fields of the physical and data link layer, starting from the source of the packet: the ID and the
-         * coordinates of this node
-         */
-
-        phy_mac_overhead->src=me;
-
-        /*
-         * Then set the ID and coordinates of the destination node with corresponding values from the entry in the
-         * estimator table
-         */
-
-        phy_mac_overhead->dst=recipient;
+        unsigned int recipient=BROADCAST_ADDRESS;
 
         /*
          * Extract the link estimator frame from the given beacon
          */
 
-        link_estimator_frame=&beacon->link_estimator_frame;
+        link_estimator_frame=&state->routing_packet.link_estimator_frame;
 
         /*
          * Now store the sequence number of this beacon in the corresponding field of the link estimator frame and then
          * increment the sequence number itself
          */
 
-        link_estimator_frame->seq=beacon_sequence;
+        link_estimator_frame->seq=state->routing_packet.;
 
         /*
-         * At this point the beacon is well formed, so it's time to send it to the specified destination => schedule a
-         * new broadcast event
+         * At this point the beacon is well formed, so it's time to send it to the neighbour nodes => ask the link
+         * layer if it's possible to broadcast it and forward the answer to the ROUTING ENGINE
          */
 
-        broadcast_message(beacon,now);
+        return send_frame(state,recipient,CTP_BEACON);
 }
 
 /*
@@ -999,14 +932,14 @@ void update_outgoing_quality(link_estimator_table_entry* entry){
          * Recompute the 1-hop ETX of the link to the neighbor
          */
 
-        update_ETX(entry,compute_ETX(new_outgoing_quality));
+        update_ETX(entry,new_outgoing_quality);
 }
 
 /*
  * UPDATE INGOING LINK QUALITY
  *
- * After BLQ_PKT_WINDOW beacons have been received from a neighbor, the value for the ingoing quality of the corresponding
- * link is updated.
+ * After BLQ_PKT_WINDOW beacons have been received from a neighbor, the value for the ingoing quality of the
+ * corresponding link is updated.
  * It is equal to the number of beacons received from a neighbor over the number of beacons broadcasted by it.
  * Before being used to compute the 1-hop ETX, the value for ingoing quality is passed through ax exponential smoothing
  * filter: this filter averages the new value of ingoing quality and those computed in the past, but weighting the
@@ -1058,7 +991,7 @@ void update_ingoing_quality(unsigned int neighbor,link_estimator_table_entry* li
                  * Check if the current entry corresponds to the neighbor
                  */
 
-                if(entry->neighbor.ID==neighbor){
+                if(entry->neighbor==neighbor){
 
                         /*
                          * Entry corresponding to the neighbor found
@@ -1137,7 +1070,7 @@ void update_ingoing_quality(unsigned int neighbor,link_estimator_table_entry* li
                                  * Update the value of 1-hop ETX for this entry with the new value for ingoing quality
                                  */
 
-                                update_ETX(entry,entry->ingoing_quality);
+                                update_ETX(entry,compute_ETX(entry->ingoing_quality));
                         }
                         break;
                 }
@@ -1232,7 +1165,7 @@ void update_neighbor_entry(unsigned char index, unsigned char seq,link_estimator
 
                 if((link_estimator_table[index].beacons_missed+link_estimator_table[index].beacons_received>=BLQ_PKT_WINDOW)
                    || (lost_beacons>=BLQ_PKT_WINDOW)) {
-                        update_ingoing_quality(link_estimator_table[index].neighbor.ID, link_estimator_table);
+                        update_ingoing_quality(link_estimator_table[index].neighbor, link_estimator_table);
                 }
         }
 }
@@ -1242,14 +1175,13 @@ void update_neighbor_entry(unsigned char index, unsigned char seq,link_estimator
  *
  * When a beacon is received by a node, its neighbor table has to be updated
  *
- * @physical_link_frame: pointer to the physical layer frame of the beacon received by the node
+ * @link_frame: pointer to the link layer frame of the beacon received by the node
  * @link_estimator_frame: pointer to the link estimator frame of the beacon received by the node
  * @routing_frame: pointer to the routing frame of the beacon received by the node
- *
  * @state: pointer to the object representing the current state of the node
  */
 
-void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_link_estimator_frame* link_estimator_frame,
+void process_received_beacon(link_layer_frame* link_frame,ctp_link_estimator_frame* link_estimator_frame,
                              ctp_routing_frame* routing_frame,node_state* state){
 
         /*
@@ -1260,10 +1192,10 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
         unsigned char index;
 
         /*
-         * ID and coordinates of the sender
+         * ID of the sender
          */
 
-        node sender;
+        unsigned int sender;
 
         /*
          * Get a pointer to the link estimator table of the current node
@@ -1275,19 +1207,19 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
          * Check if it is a broadcast message or a unicast message
          */
 
-        if(phy_mac_overhead->dst.ID==BROADCAST_ADDRESS){
+        if(link_frame->sink==BROADCAST_ADDRESS){
 
                 /*
                  * It's a broadcast message; get the identity of the sender
                  */
 
-                sender=phy_mac_overhead->src;
+                sender=link_frame->src;
 
                 /*
                  * Get the index of the entry in the estimator table that matches the sender
                  */
 
-                index=find_estimator_entry(sender.ID,link_estimator_table);
+                index=find_estimator_entry(sender,link_estimator_table);
 
                 /*
                  * Check a matching index has been found
@@ -1363,7 +1295,7 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
                                          * entry in the estimator table with the ID of the node to be added
                                          */
 
-                                        neighbor_evicted(link_estimator_table[index].neighbor.ID,state);
+                                        neighbor_evicted(link_estimator_table[index].neighbor,state);
                                         init_estimator_entry(sender,index,link_estimator_table);
                                 }
                                 else
@@ -1409,7 +1341,7 @@ void process_received_beacon(physical_datalink_overhead* phy_mac_overhead,ctp_li
                                                          * IT HAS TO BE REMOVED FROM THE ROUTING TABLE
                                                          */
 
-                                                        neighbor_evicted(sender.ID, state);
+                                                        neighbor_evicted(sender, state);
 
                                                         /*
                                                          * Replace the victim entry with the one of the new neighbor
@@ -1452,13 +1384,13 @@ void receive_routing_packet(void* message,node_state* state){
          * (LINK ESTIMATOR)
          */
 
-        process_received_beacon(&beacon->phy_mac_overhead,&beacon->link_estimator_frame,&beacon->routing_frame,state);
+        process_received_beacon(&beacon->link_frame,&beacon->link_estimator_frame,&beacon->routing_frame,state);
 
         /*
          * Then extract the routing layer frame and pass it to the ROUTING ENGINE
          */
 
-        receive_beacon(&beacon->routing_frame,beacon->phy_mac_overhead.src,state);
+        receive_beacon(&beacon->routing_frame,beacon->link_frame.src,state);
 }
 
 /*
@@ -1538,13 +1470,13 @@ void print_link_estimator_table(node_state* state){
         link_estimator_table_entry* table=state->link_estimator_table;
         int i;
         printf("###############################\n\n");
-        printf("Estimator table for node %d\n",state->me.ID);
+        printf("Estimator table for node %d\n",state->me);
         printf("Number of neighbors:%d\n",state->neighbors);
         printf("Parent:%d\n",state->route.parent);
         printf("Etx:%d\n",state->route.etx);
         for(i=0;i<state->neighbors;i++){
                 printf("Neighbor:%d lastseq:%d received:%d missed:%d inquality:%d etx:%d\n",
-                table[i].neighbor.ID,table[i].lastseq,table[i].beacons_received,table[i].beacons_missed,
+                table[i].neighbor,table[i].lastseq,table[i].beacons_received,table[i].beacons_missed,
                         table[i].ingoing_quality,table[i].one_hop_etx);
                 printf("Data sent:%d acks received:%d\n",table[i].data_sent,table[i].data_acknowledged);
         }

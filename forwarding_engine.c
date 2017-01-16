@@ -545,6 +545,12 @@ void start_forwarding_engine(node_state* state){
         state->data_packet_seqNo=0;
 
         /*
+         * Set the "type" field of the link layer frame in the data pacekt to CTP_DATA_PACKET
+         */
+
+        state->data_packet.link_frame.type=CTP_DATA_PACKET;
+
+        /*
          * Check if it's the root node: if not, schedule the sending of a data packet
          */
 

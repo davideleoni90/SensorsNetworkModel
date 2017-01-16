@@ -14,7 +14,7 @@ typedef struct _route_info route_info;
  */
 
 enum{
-        UPDATE_ROUTE_TIMER=2, // After such interval of time, the route of the node is (re)computed
+        UPDATE_ROUTE_TIMER=8000, // After such interval of time, the route of the node is (re)computed (in ms)
         INVALID_ADDRESS=0xFFFF, // Value used for the ID of neighbor that is not valid
         ROUTING_TABLE_SIZE=10, // Max number of entries in the routing table
 
@@ -31,18 +31,28 @@ enum{
          */
 
         PARENT_SWITCH_THRESHOLD=15,
-        MIN_BEACONS_SEND_INTERVAL=3, // Minimum value (max frequency) for the interval between two beacons sent
-        MAX_BEACONS_SEND_INTERVAL=7 // Maximum value (min frequency) for the interval between two beacons sent
+
+        /*
+         * Minimum value (max frequency) for the interval between two beacons sent (in ms)
+         */
+
+        MIN_BEACONS_SEND_INTERVAL=125,
+
+        /*
+         * Maximum value (min frequency) for the interval between two beacons sent (in ms)
+         */
+
+        MAX_BEACONS_SEND_INTERVAL=500000
 };
 
 /* ROUTING ENGINE API */
 
 void neighbor_evicted(unsigned int address,node_state* state);
 bool get_etx(unsigned short* etx,node_state* state);
-node get_parent(node_state* state);
+unsigned int get_parent(node_state* state);
 void update_route(node_state* state);
 void reset_beacon_interval(node_state* state);
-void receive_beacon(ctp_routing_frame* routing_frame, node from,node_state*state);
+void receive_beacon(ctp_routing_frame* routing_frame, unsigned int from,node_state*state);
 void send_beacon(node_state* state);
 void schedule_beacons_interval_update(node_state* state);
 void double_beacons_send_interval(node_state* state);

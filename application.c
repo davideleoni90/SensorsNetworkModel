@@ -4,14 +4,12 @@
 #include <ROOT-Sim.h>
 #include "application.h"
 #include "forwarding_engine.h"
+#include "wireless_links.h"
+#include "link_layer.h"
 #include <math.h>
 #include <limits.h>
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
-
-double discarded_packets=0;
-double accepted_packets=0;
-
 
 double collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
 
@@ -57,34 +55,16 @@ double failure_lambda=0.0005;
 
 double failure_threshold=0.9;
 
-/*
- * COORDINATES OF NODES
- *
- * Dynamically allocated array containing the coordinates of each node in the network (length = n_proc_tot, the number
- * of logical processes in the simulation) indexed according to the ID; the coordinates of the nodes are read from a
- * configuration file decided by the user.
- *
- * The list of coordinates comes into play when a node sends BROADCAST messages. Since the Collection Tree Protocol is
- * a distributed algorithm, nodes initially know nothing about the number of nodes in the network, about their IDs and
- * coordinates => the only way to learn about them is sending broadcasting beacons: those nodes that are within the
- * area covered by the wireless link (neighbours) will learn about the position and ID of the node, and will store them
- * in the ROUTING TABLE. In this way, they will be able to send him unicast messages in the future.
- * When a node send beacons, it's not aware of the coordinates and IDs of the nodes in the network, so it has to ask
- * the simulator to deliver the messages to the neighbours. The simulator keeps track of the number of nodes in the WSN,
- * of their coordinates and IDs through the following array
- */
-
-node_coordinates* nodes_coordinates_list;
+extern gain_entry* gains_list;
+extern noise_entry* noise_list;
 
 /* GLOBAL VARIABLES (shared among all logical processes) - end */
 
 /* FORWARD DECLARATIONS */
 
-void parse_topology(const char* path);
+void read_input_file(const char* path);
 void start_routing_engine(node_state* state);
-bool is_message_received(node_coordinates a,node_coordinates b);
 bool is_failed(simtime_t now);
-double euclidean_distance(node_coordinates a,node_coordinates b);
 
 /*
  * Application-level callback: this is the interface between the simulator and the model being simulated
@@ -97,12 +77,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
          */
 
         node_state *state;
-
-        /*
-         * The structure representing this node
-         */
-
-        node this_node;
 
         /*
          * Index to iterate through nodes
@@ -333,12 +307,16 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          */
 
                         /*
-                         * First store ID and coordinates in the state
+                         * First store ID in the state
                          */
 
-                        this_node.ID=me;
-                        this_node.coordinates=nodes_coordinates_list[me];
-                        state->me=this_node;
+                        state->me=me;
+
+                        /* INIT LINK LAYER - start */
+
+                        init_link_layer(state);
+
+                        /* INIT LINK LAYER - end */
 
                         /* INIT CTP STACK - start */
 
@@ -375,6 +353,14 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         break;
 
+                /*
+                 *
+                 *
+                 * EVENTS SENT BY THE ROUTING ENGINE - start
+                 *
+                 *
+                 */
+
                 case UPDATE_ROUTE_TIMER_FIRED:
 
                         /*
@@ -384,18 +370,19 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         if(state->state&RUNNING) {
 
                                 /*
-                                 * It's time for the ROUTING ENGINE to update the route of the node => invoke the dedicated
-                                 * function.
+                                 * It's time for the ROUTING ENGINE to update the route of the node => invoke the
+                                 * dedicated function.
                                  */
 
                                 update_route(state);
 
                                 /*
-                                 * The time simulated through this event is periodic => schedule this event after the same amount
-                                 * of time, starting from now
+                                 * The time simulated through this event is periodic => schedule this event after the
+                                 * same amount of time, starting from now
                                  */
 
-                                wait_until(me, now + UPDATE_ROUTE_TIMER, UPDATE_ROUTE_TIMER_FIRED);
+                                wait_until(me, now + ((UPDATE_ROUTE_TIMER/1000)*TICKS_PER_SEC),
+                                           UPDATE_ROUTE_TIMER_FIRED);
                         }
                         break;
 
@@ -408,8 +395,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         if(state->state&RUNNING) {
 
                                 /*
-                                 * It's time for the ROUTING ENGINE to send a beacon to its neighbors => before doing this,
-                                 * update the route, so that information repSEND_BEACONS_TIMER_FIREDorted in the beacon will not be obsolete
+                                 * It's time for the ROUTING ENGINE to send a beacon to its neighbors => before doing
+                                 * this, update the route, so that information reported in the beacon will not be
+                                 * obsolete
                                  */
 
                                 update_route(state);
@@ -429,6 +417,31 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 schedule_beacons_interval_update(state);
                         }
                         break;
+
+                case SET_BEACONS_TIMER:
+
+                        /*
+                         * If the node is not running, do nothing
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * This event is processed when the interval associated to the timer for beacons has to be
+                                 * updated
+                                 */
+
+                                double_beacons_send_interval(state);
+                        }
+                        break;
+
+                /*
+                 *
+                 *
+                 * EVENTS SENT BY THE ROUTING ENGINE - end
+                 *
+                 *
+                 */
 
                 case SEND_PACKET_TIMER_FIRED:
 
@@ -473,23 +486,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         }
                         break;
 
-                case SET_BEACONS_TIMER:
-
-                        /*
-                         * If the node is not running, do nothing
-                         */
-
-                        if(state->state&RUNNING) {
-
-                                /*
-                                 * This event is processed when the interval associated to the timer for beacons has to be
-                                 * updated
-                                 */
-
-                                double_beacons_send_interval(state);
-                        }
-                        break;
-
                 case BEACON_RECEIVED:
 
                         /*
@@ -507,20 +503,39 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         }
                         break;
 
-                case DATA_PACKET_RECEIVED:
+                //case DATA_PACKET_RECEIVED:
 
                         /*
                          * If the node is not running, do nothing
                          */
 
-                        if(state->state&RUNNING) {
+                        //if(state->state&RUNNING) {
 
                                 /*
                                  * The node has received a data packet => let the FORWARDING ENGINE process it and send
                                  * an ack to the sender
                                  */
 
-                                receive_data_packet((ctp_data_packet *) event_content, state,now);
+                                //receive_data_packet((ctp_data_packet *) event_content, state,now);
+                        //}
+                        //break;
+
+                case DATA_PACKET_DELIVERED:
+
+                        /*
+                         * Check if the node can receive a data packet sent by another node.
+                         * If it's not running, the packet will never be received
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * Compute the strength of the signal carrying the packet received by the recipient.
+                                 * This is equal to the strength of the signal representing the noise of the environment
+                                 * plus the strength of the signal associated to the transmission
+                                 */
+
+                                double signal_strength=compute_signal_strenght(me);
                         }
                         break;
 
@@ -564,6 +579,73 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 is_ack_received(state, (ctp_data_packet *) event_content);
                         }
                         break;
+
+                /*
+                 *
+                 * EVENTS SENT BY THE LINK LAYER - start
+                 *
+                 *
+                 */
+
+                case CHECK_CHANNEL_FREE:
+
+                        /*
+                         * If the node is not running, do nothing
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * This event is delivered to a node by itself when it has to check whether the channel
+                                 * is free after the backoff time.
+                                 * The handler of this event has to perform this check and then, depending on how the
+                                 * parameters of the CSMA protocol have been set and whether the channel is free or not,
+                                 * either it starts to transmit the frame over the link or schedules a new check after
+                                 * another backoff time
+                                 */
+
+                                check_channel(state);
+                        }
+                        break;
+
+                case START_FRAME_TRANSMISSION:
+
+                        /*
+                         * If the node is not running, do nothing
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * This event is delivered to a node by itself when it has to start transmitting a frame
+                                 */
+
+                                start_frame_transmission(state);
+                        }
+                        break;
+
+                case FRAME_TRANSMITTED:
+
+                        /*
+                         * If the node is not running, do nothing
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * This event is delivered to a node by itself when the transmission of a frame is over
+                                 */
+
+                                frame_transmitted(state);
+                        }
+                        break;
+
+                /*
+                 *
+                 * EVENTS SENT BY THE LINK LAYER - end
+                 *
+                 *
+                 */
 
                 default:
                         printf("Events not handled\n");
@@ -639,9 +721,6 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                         continue;
                                 printf("Packets from %d:%d\n",i,collected_packets_list[i]);
                         }
-                        printf("discarded:%f\n",discarded_packets);
-                        printf("accepted:%f\n",accepted_packets);
-                        printf("ratio:%f\n",discarded_packets/accepted_packets);
                         fflush(stdout);
                         return true;
                 }
@@ -711,9 +790,6 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                 continue;
                         printf("Packets from %d:%d\n",i,collected_packets_list[i]);
                 }
-                printf("discarded:%f\n",discarded_packets);
-                printf("accepted:%f\n",accepted_packets);
-                printf("ratio:%f\n",discarded_packets/accepted_packets);
                 fflush(stdout);
                 return true;
         }
@@ -727,7 +803,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
 }
 
 
-/* SIMULATION API - start */
+/* SIMULATION FUNCTIONS - start */
 
 /*
  * WAIT TIME
@@ -750,187 +826,40 @@ void wait_until(unsigned int me,simtime_t timestamp,unsigned int type){
 }
 
 /*
- * BROADCAST EVENT
+ * READ INPUT FILE
  *
- * Function invoked by the node, in particular, by its LINK ESTIMATOR layer, when it has to send a message to all the
- * other nodes in the sensors network, i.e. when the node has to send a beacon to its neighbors.
+ * Read the input file containing the list of the links between nodes, including the gain of each wireless link; also
+ * the file has to provide the noise floor and white gaussian noise affecting each node.
+ * For each wireless link there has to be a line with this syntax:
  *
- * @beacon: the message to be broadcasted
- * @time: virtual time when the message should be delivered
- */
-
-void broadcast_message(ctp_routing_packet* beacon,simtime_t time) {
-
-        /*
-         * Index used to iterate through nodes of the network
-         */
-
-        unsigned char i;
-
-        /*
-         * Get the sender node: it's identity is reported in the physical overhead of the given packet
-         */
-
-        node src = beacon->phy_mac_overhead.src;
-
-        /*
-         * For each node (logical process) calculate the euclidean distance from the sender and, depending on this,
-         * check whether it receives the message or not.
-         */
-
-        for (i = 0; i < n_prc_tot; i++) {
-
-                /*
-                 * Coordinates of the current node
-                 */
-
-                node_coordinates recipient_coordinates;
-
-                /*
-                 * State of the current node
-                 */
-
-                unsigned int recipient_state;
-
-                /*
-                 * Skip the sender of the message
-                 */
-
-                if (i == src.ID)
-                        continue;
-
-                /*
-                 * Get coordinates of the current node from the dedicated list
-                 */
-
-                recipient_coordinates = nodes_coordinates_list[i];
-
-                /*
-                 * If the message can be received by the neighbor, according to the simulator, it will process an event
-                 * of type "BEACON_RECEIVED" (unless it fails before)
-                 */
-
-
-                if (is_message_received(src.coordinates, recipient_coordinates)) {
-                        ScheduleNewEvent(i, time + MESSAGE_DELIVERY_TIME, BEACON_RECEIVED, beacon,
-                                         sizeof(ctp_routing_packet));
-                }
-        }
-}
-
-/*
- * UNICAST MESSAGE
+ * "gain"\t source_node_id\t sink_node_id\t link_gain\n
  *
- * Function invoked by the node, in particular, by its FORWARDING ENGINE, when it has to a data packet to its parent or
- * an acknowledgment to one of its children
+ * For each node in the network there has to be a line with this syntax:
  *
- * @packet: the message to be sent (NULL in case of ack)
- * @time: virtual time of the node
- * @me: ID of the sender
- */
-
-void unicast_message(ctp_data_packet* packet,simtime_t time, unsigned int me) {
-
-        /*
-         * Coordinates of the parent node
-         */
-
-        node_coordinates recipient_coordinates;
-
-        /*
-         * Get the sender node: it's identity is reported in the physical overhead of the given packet
-         */
-
-        node src = packet->phy_mac_overhead.src;
-
-        /*
-         * Get the recipient node: it's identity is reported in the physical overhead of the given packet
-         */
-
-        node dst = packet->phy_mac_overhead.dst;
-
-        /*
-         * Get coordinates of the current node from the dedicated list
-         */
-
-        recipient_coordinates = dst.coordinates;
-
-        /*
-         * If the message can be received by the parent according to the simulator, it will be delivered an event of type
-         * "DATA_PACKET_RECEIVED"
-         */
-
-        if (is_message_received(src.coordinates,recipient_coordinates)) {
-                ScheduleNewEvent(dst.ID, time + MESSAGE_DELIVERY_TIME, DATA_PACKET_RECEIVED, packet,
-                                 sizeof(ctp_data_packet));
-        }
-
-        /*
-         * Start a timer that will be fired after the maximum time for receiving an acknowledgment: at that moment, the
-         * packet might have been already acknowledged or not, and this information is crucial to evaluate the outgoing
-         * quality of the link to the parent. In order to check whether the ack has been received before the timeout,
-         * the node compares the last packet in the output queue with the one provided with the event below: if they
-         * are different, the packet has already been acknowledged before the timeout, otherwise the packet has not
-         * been acknowledged.
-         */
-
-        ScheduleNewEvent(me,time+ACK_TIMEOUT_OFFSET,CHECK_ACK_RECEIVED,packet,sizeof(ctp_data_packet));
-}
-
-/*
- * SEND ACKNOWLEDGMENT
+ * "noise"\t node_id\t noise_floor\t gaussian_white_noise\n
  *
- * After a node has successfully received a data packet, it replies with an acknowledgment: this may or may not be
- * received, depending on the interferences affecting the network. In the former case, the recipient of the ack is
- * delivered an event of type "ACK_RECEIVED"
+ * Such file can be easily generated using the "LinkLayerModel" from the TOSSIM simulator.
+ * Being n the number of LPs of the simulation, this function reads at most n(n-1) lines starting with the word "gain"
+ * and up to n lines starting with the word "noise". The file has to provide the description of at least one link for
+ * each of the n nodes in the simulation, while the description of the noise is not mandatory: if the value of the noise
+ * for a node is missing, a default value is used.
  *
- * @sender_coordinates: coordinates of the node that is sending the ack
- * @recipient: the structure representing the node that is waiting for the ack
- * @time: virtual time of the node
- */
-
-void send_ack(node_coordinates sender_coordinates,node recipient,simtime_t time){
-
-        /*
-         * If the ack is received, according to the simulator, schedule a new event of type "ACK_RECEIVED" for the
-         * recipient
-         */
-
-        if (is_message_received(sender_coordinates,recipient.coordinates)) {
-                ScheduleNewEvent(recipient.ID, time + MESSAGE_DELIVERY_TIME, ACK_RECEIVED, NULL,0);
-        }
-}
-
-/* SIMULATION API - end */
-
-/* SIMULATION FUNCTIONS - start */
-
-/*
- * PARSE FILE CONTAINING THE TOPOLOGY OF THE NETWORK
- *
- * Read the file in order to determine the coordinates of the nodes in the sensors network; then store them in the
- * array "nodes_coordinates_list"
- *
- * NOTE: this function is executed only by the root node (either the one chosen by the user with the parameter "root" or
- * the default root)
- *
- * @path: filename of the file containing the topology of the network
+ * @path: filename of the input file
  *
  * NOTE: THE FILE HAS TO BE IN THE SAME DIRECTORY AS THE MODEL BEING RUN
  */
 
-void parse_topology(const char* path){
+void read_input_file(const char* path){
 
         /*
-         * Number of current line in the configuration file; this is also used to check that the file contains the
-         * coordinates for all the nodes of the simulation
+         * Number of current line read from the file
          */
 
         unsigned int lines=0;
 
         /*
-         * Parameters required only by the function "getline": if "lineptr" is set to NULL before the call and "n" is
-         * set to 0, getline allocates a buffer for storing the line; "read" is the length of line
+         * Parameters required only by the function "getline": if "lineptr" is set to NULL before the call and "len" is
+         * set to 0, getline allocates a buffer for storing the line
          */
 
         size_t len=0;
@@ -953,97 +882,157 @@ void parse_topology(const char* path){
         }
 
         /*
-         * The path is valid => allocate a new array of "public_node_state" with a number of elements equal to the
-         * number of LPs
+         * The path is valid => allocate a new array of pointers to "gain_entry" with a number of elements equal to the
+         * number of LPs: each element of the array contains the list of the links of the node, including the value of
+         * their associated gains
          */
 
-        nodes_coordinates_list=malloc(sizeof(node_coordinates)*n_prc_tot);
+        gains_list=malloc(sizeof(gain_entry*)*n_prc_tot);
 
         /*
-         * Now read the file line by line and store the coordinates at line "i" at index "i" of the list; also
-         * initialize the state of each element
+         * Initialize pointers to null
+         */
+
+        for(int i=0;i<n_prc_tot;i++)
+                gains_list[i]=NULL;
+
+        /*
+         * Allocates an array containing an instance of type "noise_entry" for each node: this will be initialized to
+         * the values of noise read from the input file; in case no value is specified for a node, the default value of
+         * noise is used
+         */
+
+        noise_list=malloc(sizeof(noise_entry)*n_prc_tot);
+
+        /*
+         * Now read the file line by line and store the values for gain and noise in the corresponding lists
          */
 
         while(getline(&lineptr,&len,file)!=-1){
 
                 /*
-                 * Structure representing the coordinates of the current node (logical process)
+                 * Array of tokens after the first word in a line. In case of line describing the noise, they are:
+                 *
+                 * 1-ID of the node
+                 * 2-node's noise floor
+                 * 3-node's white gaussian noise
+                 *
+                 * In case of line describing a link, they are:
+                 *
+                 * 1-ID of the source node of the link
+                 * 2-ID of the sink node of the link
+                 * 3-gain of the link
+                 * 4-length of the link
                  */
 
-                node_coordinates node_coordinates;
+                double tokens[3];
 
                 /*
-                 * String representation of the x coordinate of a node
+                 * Index variable for the remaining tokens
                  */
 
-                char* x_coordinate;
-                /*
-                 * String representation of the y coordinate of a node
-                 */
-
-                char* y_coordinate;
+                unsigned char index=0;
 
                 /*
-                 * Check whether the number of lines read so far is greater than the number logical processes specified
-                 * by the user => if so, stop parsing
+                 * Get the first word in the line: it has to be either "gain" or "noise"
                  */
 
-                if(lines==n_prc_tot)
-                        break;
+                char* line_type=strtok(lineptr,"\t");
 
                 /*
-                 * Parse the x coordinate
+                 * Check if the first word of the line is valid: if not, abort simulation
                  */
 
-                x_coordinate=strtok(lineptr,",");
-
-                /*
-                 * Check if not null: if so, exit with error
-                 */
-
-                if(!x_coordinate) {
-                        printf("[FATAL ERROR] Line %i of the file with the topology is not well formed\n", lines);
-                        free(nodes_coordinates_list);
-                        free(lineptr);
+                if((!strcmp(line_type,"gain"))&&(!strcmp(line_type,"noise"))){
+                        printf("[FATAL ERROR] Line %i of the file is not well formed\n"
+                                       "It has to start with either \"noise\" or \"gain\"\n", lines);
                         fclose(file);
                         exit(EXIT_FAILURE);
                 }
 
                 /*
-                 * Translate x coordinate to int
+                 * Get further three tokens
                  */
 
-                node_coordinates.x=atoi(x_coordinate);
+                while(index<3){
 
-                /*
-                 * Parse the y coordinate
-                 */
+                        /*
+                         * Get the next token
+                         */
 
-                y_coordinate=strtok(NULL,",");
+                        char* token=strtok(lineptr,"\t");
 
-                /*
-                 * Check if not null: if so, exit with error
-                 */
+                        /*
+                         * Check if valid: if not, abort simulation
+                         */
 
-                if(!y_coordinate) {
-                        printf("[FATAL ERROR] Line %i of the file with the topology is not well formed\n", lines);
-                        free(nodes_coordinates_list);
-                        free(lineptr);
-                        fclose(file);
-                        exit(EXIT_FAILURE);
+                        if(!token){
+                                printf("[FATAL ERROR] Line %i of the file is not well formed\n", lines);
+                                fclose(file);
+                                exit(EXIT_FAILURE);
+                        }
+
+                        /*
+                         * Store token
+                         */
+
+                        sscanf(token,"%lf",tokens[index]);
+
+                        /*
+                         * Increment the index
+                         */
+
+                        index++;
                 }
 
                 /*
-                 * Translate x coordinate to int
+                 * Depending on the type of line, fill different lists
                  */
 
-                node_coordinates.y=atoi(y_coordinate);
+                if(strcmp(line_type,"gain")){
 
-                /*
-                 * The coordinates were correctly specified => store them in the list
-                 */
+                        /*
+                         * The length of the link to be parsed
+                         */
 
-                nodes_coordinates_list[lines]=node_coordinates;
+                        double length;
+
+                        /*
+                         * Get the last token (length of the link)
+                         */
+
+                        char* token=strtok(lineptr,"\t");
+
+                        /*
+                         * Check if the last token is valid too
+                         */
+
+                        if(!token){
+                                printf("[FATAL ERROR] Line %i of the file is not well formed\n", lines);
+                                fclose(file);
+                                exit(EXIT_FAILURE);
+                        }
+
+                        /*
+                         * Convert the token into a double
+                         */
+
+                        sscanf(token,"%lf",length);
+
+                        /*
+                         * The current line describes the gain of a link
+                         */
+
+                        add_gain_entry((unsigned  int)tokens[0],(unsigned  int)tokens[1],tokens[2],length);
+                }
+                else{
+
+                        /*
+                         * The current line describes the noise of a node
+                         */
+
+                        add_noise_entry((unsigned  int)tokens[0],tokens[1],tokens[2]);
+                }
 
                 /*
                  * Increment the counter for lines read
@@ -1066,112 +1055,14 @@ void parse_topology(const char* path){
                 free(lineptr);
 
         /*
-         * If the number of lines in the configuration file is less than the number of logical processes, exit with
-         * error
+         * Check that there's at least one link for each node by computing the difference between the number of elements
+         * in the gain list and the variable n_proc_tot: if not zero, abort simulation
          */
 
-        if(lines<n_prc_tot) {
-                printf("[FATAL ERROR] Missing coordinates for %d node(s) in the file with the topology\n",
-                       n_prc_tot-lines);
-                free(nodes_coordinates_list);
+        if(n_prc_tot-get_nodes()) {
+                printf("[FATAL ERROR] Missing link for %d node(s) in the file\n",
+                       n_prc_tot-get_nodes());
                 exit(EXIT_FAILURE);
-        }
-}
-
-/*
- * CAN RECEIVE MESSAGE?
- *
- * This function determines, given the coordinates of two nodes, whether or not a message sent by one of the two is
- * received by the other one, and vice versa.
- *
- * In fact this models takes into account the fact that radio transceiver of sensor nodes has a limited coverage =>
- * a broadcast message will be received only by those nodes whose distance from the sender is within a certain bound.
- *
- * This simulation model adopts the QUASI UNIT DISK GRAPH to represent this fact.
- * Nodes can receive messages from their "neighbor nodes" => two nodes A and B are neighbors if the euclidean distance
- * between them is less than or equal to "r" (simulation parameter).
- * If their distance is less than or equal to "p" (simulation parameter), with p in the interval (0,r], messages sent
- * by A to B and by B to A are certainly delivered.
- * If their distance is in the range (p,r], messages sent by A to B and by B to A may or may not be delivered
- * => for two such nodes this function may return different values every time it is executed; anyway, the closer the two
- * nodes, the more likely that messages are delivered.
- *
- * @a: coordinates of the sender
- * @b: coordinates of the recipient
- *
- * Returns true if a message sent by one of the two nodes can be received by the other one, false otherwise
- */
-
-bool is_message_received(node_coordinates a,node_coordinates b){
-
-        /*
-         * Get the euclidean distance between the nodes
-         */
-
-        double distance=euclidean_distance(a,b);
-
-        /*
-         * Check that the distance is not null: if so, it means that two nodes with different IDs have the same
-         * coordinates => there's an error in the configuration file => exit with error
-         */
-
-        if(!distance){
-                printf("[FATAL ERROR] Two different nodes have the same coordinates => fix the coordinates in "
-                               "the configuration file\n");
-                printf("distance is:%f\n",distance);
-                fflush(stdout);
-                exit(EXIT_FAILURE);
-        }
-
-        /*
-         * Check the distance and decide how to proceed
-         */
-
-        if(distance>NEIGHBORS_MAX_DISTANCE) {
-
-                /*
-                 * Nodes are not neighbors => no way a message can be received => return false
-                 */
-
-                return false;
-
-        }
-        else{
-
-                /*
-                 * Nodes are neighbors => if the distance is less than NEIGHBORS_SAFE_DISTANCE, the message is delivered
-                 * to the recipient
-                 */
-
-                if(distance<=NEIGHBORS_SAFE_DISTANCE)
-                        return true;
-                else{
-
-                        /*
-                         * Choose a random number in the range [0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE]
-                         * and add it to the current distance
-                         */
-
-                        distance+=RandomRange(0,NEIGHBORS_MAX_DISTANCE-NEIGHBORS_SAFE_DISTANCE);
-
-                        /*
-                         * If the distance is not beyond NEIGHBORS_MAX_DISTANCE the message is delivered and true is
-                         * returned; otherwise false is returned
-                         *
-                         * NOTE: closer neighbors have higher likelihood to receive the message
-                         */
-
-                        fflush(stdout);
-                        if(distance<NEIGHBORS_MAX_DISTANCE) {
-                                accepted_packets++;
-                                return true;
-                        }
-                        else {
-                                discarded_packets++;
-                                return false;
-                        }
-                }
-
         }
 }
 
@@ -1265,33 +1156,6 @@ bool is_failed(simtime_t now){
                 return true;
         }
         return false;
-}
-
-/*
- * EUCLIDEAN DISTANCE
- *
- * Return the euclidean distance between given nodes
- */
-
-double euclidean_distance(node_coordinates a,node_coordinates b){
-
-        /*
-         * Difference between x coordinates of the nodes
-         */
-
-        int x_difference=a.x-b.x;
-
-        /*
-         * Difference between y coordinates of the nodes
-         */
-
-        int y_difference=a.y-b.y;
-
-        /*
-         * Return euclidean distance
-         */
-
-        return sqrt(x_difference*x_difference+y_difference*y_difference);
 }
 
 /*

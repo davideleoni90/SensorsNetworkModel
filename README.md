@@ -146,3 +146,38 @@ Each <i>Logical Processes (LP)</i> created by ROOT-Sim represents a node in the 
 <br>The function relies on a global array where the <i>i</i>-th element contains the coordinates of the node with ID <i>i</i>.
 <br><b>The fact that such an array is available to all the LPs may seem in contrast with the above statement about the distribute nature of the Collection Tree Protocol. The contradiction can be explained by noting that nodes performs the step</b>
 <br> The model actually gives the user the chance to decide the value of <i>p</i> and <i>q</i> (but if the former parameter is given by the user, also the latter has to be provided, and vice versa).</p>
+<h3>Input to the simulation</h3>
+<p align="justify">
+TOSSIM allows the user to define the topology of the network in terms of gain  of the links among all the pairs of nodes. The user has to option:
+<ol>
+<li align="justify">using data from a real network</li>
+<li align="justify">deducing the gain values on the basis of the position of the nodes</li>
+</ol>
+<p align="justify">
+TOSSIM comes with the java script <i>LinkLayerModel.java</i> to help the user in case he/she chooses the second option. The script requires a <i>configuration file</i> where the user can provide the following parameters:
+</p>
+<ol>
+<li align="justify"><i>channel parameters</i> related to </li>
+<li align="justify"><i>radio parameters</i></li>
+<li align="justify"><i>radio parameters</i></li>
+<li align="justify"><i>covariance matrix for hardware variance</i></li>
+<li align="justify"><i>topology parameters</i></li>
+</ol>
+<p align="justify">
+The user if free to provide none of these parameters, using their default values, some or all of them.
+<br>In particular, as regards with the topology, the user can either provide its own x-y coordinates for all the nodes or let the script create them, choosing between three different distributions:
+</p>
+<ol>
+<li align="justify"><i>grid</i></li>
+<li align="justify"><i>uniform</i></li>
+<li align="justify"><i>random</i></li>
+</ol>
+<p align="justify">In case the user wants to provide its own list of coordinates, this has to be given in a different text file using the following syntax for the coordinates of each node:
+</p>
+<p align="center">
+node_id TAB x_coordinate TAB y_coordinate
+</p>
+<p align="justify">
+The distance between any pair of nodes must be greater than or equal than the <i>inter-nodes distance</i> given among the channel parameters.
+ 
+</p>

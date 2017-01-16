@@ -8,29 +8,6 @@ typedef struct _node_state node_state;
 typedef double simtime_t;
 
 /*
- * NODE COORDINATES
- *
- * Each node (logic process) has some spatial coordinates, represented by this structure
- */
-
-typedef struct _node_coordinates{
-        int x;
-        int y;
-}node_coordinates;
-
-/*
- * NODE
- *
- * Each logic process of the simulation corresponds to a node and is uniquely identified by its ID and its coordinates,
- * which are randomly assigned by the simulator with the INIT event
- */
-
-typedef struct _node{
-        unsigned int ID;
-        node_coordinates coordinates;
-}node;
-
-/*
  * CONSTANTS RELATED TO THE LINK ESTIMATOR
  */
 
@@ -81,7 +58,7 @@ enum{
  */
 
 typedef struct _link_estimator_table_entry{
-        node neighbor; // ID and coordinates of the neighbor
+        unsigned int neighbor; // ID of the neighbor
         unsigned char lastseq; // Last beacon sequence number received from the neighbor
 
         /*
@@ -155,11 +132,11 @@ unsigned short get_one_hop_etx(unsigned int address,link_estimator_table_entry* 
 bool unpin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
 bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
 bool clear_data_link_quality(unsigned int address,link_estimator_table_entry* link_estimator_table);
-void send_routing_packet(ctp_routing_packet* beacon,unsigned char beacon_sequence,node me,simtime_t now);
+bool send_routing_packet(node_state* state);
 void receive_routing_packet(void* message,node_state* state);
 bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
-void insert_neighbor(node neighbor,link_estimator_table_entry* link_estimator_table);
-void get_parent_coordinates(node* parent,link_estimator_table_entry* link_estimator_table);
+int insert_neighbor(unsigned int neighbor,link_estimator_table_entry* link_estimator_table);
+//void get_parent_coordinates(node* parent,link_estimator_table_entry* link_estimator_table);
 void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
 void init_link_estimator_table(link_estimator_table_entry* link_estimator_table);
 void print_link_estimator_table(node_state* state);

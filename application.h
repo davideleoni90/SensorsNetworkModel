@@ -14,9 +14,8 @@
 
 enum{
         /*
-         * After the root node (logical process) has parsed the configuration file provided by the user (containing
-         * coordinates of the nodes), it broadcasts this event to all the other nodes to tell them they can finally
-         * start
+         * After the root node (logical process) has parsed the configuration file provided by the user, it broadcasts this
+         * event to all the other nodes to tell them they can finally start
          */
 
         START_NODE=1,
@@ -24,11 +23,25 @@ enum{
         SEND_PACKET_TIMER_FIRED=3, // The timer for data packets has been fired  => send a data packet
         UPDATE_ROUTE_TIMER_FIRED=4, // The timer for updating the route has been fired
         SET_BEACONS_TIMER=5, // The interval of the timer for beacons has to be updated
-        DATA_PACKET_RECEIVED=6, // The node has received a data packet
+        DATA_PACKET_DELIVERED=6, // The node has been delivered a data packet => check if it can be received
         BEACON_RECEIVED=7, // The node has received a data packet
         RETRANSMITT_DATA_PACKET=8, // Try to re-send a data packet whose first sending attempt failed
         CHECK_ACK_RECEIVED=9, // Check whether the last data packet sent has been acknowledged or not
-        ACK_RECEIVED=10 // The ack for the last data packet sent has just been received
+        ACK_RECEIVED=10, // The ack for the last data packet sent has just been received
+        CHECK_CHANNEL_FREE=11, // The link layer has to check whether the channel is free
+        START_FRAME_TRANSMISSION=12, // The link layer starts to transmit a frame over the channel
+        FRAME_TRANSMITTED=13 // The frame has been transmitted
+};
+
+/*
+ * RADIO FLAGS
+ *
+ * Flags that indicate the state of the radio transceiver
+ */
+
+enum {
+        RADIO_SENDING=0x1, // The radio is busy sending a frame
+        RADIO_RECEIVING=0x2 // The radio is busy receiving a frame
 };
 
 /*
@@ -51,48 +64,42 @@ enum{
         CTP_PULL= 0x80, // TEP 123: P field
         CTP_CONGESTED= 0x40, // TEP 123: C field
         BROADCAST_ADDRESS=0xffff, // A packet with such an address is sent to all the neighbor nodes
+        CTP_BEACON=0x1, // Flag indicating that the packet is a beacon
+        CTP_DATA_PACKET=0x2 // Flag indicating that the packet carries data from the sensor(s)
+};
 
-        /*
-         * Time for a message to be delivered to its recipient
-         */
+/*
+ * SIMULATION CONSTANTS
+ */
 
-        MESSAGE_DELIVERY_TIME=1,
+enum{
+        TICKS_PER_SEC=10000000000ULL, // Number of simulation ticks per second
+        MAX_TIME=1000, // Upper bound of data packets received by the root for the simulation to stop
 
         /*
          * Lower bound of data packets received by the root from each node for the simulation to stop
          */
 
-        COLLECTED_DATA_PACKETS_GOAL=10,
-
-        /*
-         * Upper bound of data packets received by the root for the simulation to stop
-         */
-
-        MAX_TIME=1000,
-
-        /*
-         * Maximum euclidean distance between two nodes for them to be considered neighbors
-         */
-
-        NEIGHBORS_MAX_DISTANCE=10,
-
-        /*
-         * If the euclidean distance between two neighbor nodes is less than this constants, every message sent by
-         * either of the nodes is certainly received by the other node; if the distance is it equal or greater than,
-         * message may or may not be received
-         */
-
-        NEIGHBORS_SAFE_DISTANCE=6
+        COLLECTED_DATA_PACKETS_GOAL=10
 };
 
 /*
- * PHYSICAL & DATA LINK OVERHEAD
+ * LINK-LAYER FRAME
  */
 
-typedef struct _physical_datalink_overhead{
-        node src;
-        node dst;
-}physical_datalink_overhead;
+typedef struct _link_layer_frame{
+        unsigned int src; // ID of the node that sends the frame
+        unsigned int sink; // ID of the node the frame is destined to
+        double gain; // Gain of the sender node
+        bool wait_ack; // Boolean flag indicating whether the node has to wait for the acknowledgment of a packet sent
+
+        /*
+         * Type of the packet: beacon or data packet. This piece of information is used to by the LINK LAYER to decide
+         * whether the packet should be transmitted as a broadcast message or a unicast message respectively
+         */
+
+        unsigned char type;
+}link_layer_frame;
 
 /*
  * CTP LINK ESTIMATOR FRAME
@@ -109,15 +116,19 @@ typedef struct _ctp_link_estimator_frame{
 typedef struct _ctp_routing_frame{
         unsigned char options;
         unsigned int parent;
-        unsigned char ETX;
+        unsigned short ETX;
 }ctp_routing_frame;
 
 /*
- * CTP ROUTING PACKET
+ * ROUTING PACKET (BEACON)
+ *
+ * Structure representing a routing packet: it contains the description of the current route the node, and it has to be
+ * sent to neighbors nodes in order to help them in the choice of their own route to the root of the collection tree.
+ * A beacon passes from the ROUTING ENGINE to the LINK ESTIMATOR, before being transmitted from the LINK LAYER
  */
 
 typedef struct _ctp_routing_packet{
-        physical_datalink_overhead phy_mac_overhead;
+        link_layer_frame link_frame;
         ctp_link_estimator_frame link_estimator_frame;
         ctp_routing_frame routing_frame;
 }ctp_routing_packet;
@@ -139,7 +150,7 @@ typedef struct _ctp_data_packet_frame{
  */
 
 typedef struct _ctp_data_packet{
-        physical_datalink_overhead phy_mac_overhead;
+        link_layer_frame link_frame;
         ctp_data_packet_frame data_packet_frame;
         int payload;
 }ctp_data_packet;
@@ -181,30 +192,69 @@ typedef struct _routing_table_entry{
 }routing_table_entry;
 
 /*
+ * GAIN ENTRY
+ *
+ * Data structure representing the gain associated to a single directed wireless link.
+ * The value of the gain is provided by the input file of the simulation.
+ * For each node of the simulation there's a list of elements of such type, one for each of its links
+ */
+
+typedef struct _gain_entry{
+        double gain; // Gain associated to the link
+        unsigned int sink; // ID of the sink node of the link
+        double distance; // The length of the link, i.e. the euclidean distance between its vertices
+        bool up; // Boolean value indicating whether the link is up; it goes down when the node crashes
+        struct gain_entry* next; // Pointer to the next entry in the list of gains
+}gain_entry;
+
+/*
+ * NOISE ENTRY
+ *
+ * Data structure representing the noise associated to a node (in dBm).
+ * The input file contains the value of the noise floor for each node. Because of thermal noise, the node's noise floor
+ * read by the node changes over time: this variability is modelled as a Gaussian random variable with MEAN VALUE 0 and
+ * STANDARD DEVIATION given by the WHITE GAUSSIAN NOISE, also provided together with the noise floor by the input file.
+ */
+
+typedef struct _noise_entry{
+        double noise_floor; // Value of the noise floor for the node
+        double range; // Standard deviation of the dynamic component of the noise characterizing a node
+}noise_entry;
+
+/*
  * NODE STATE
  *
  * Structure representing the state of a node (logic process) at any point in the virtual time.
  * Its main data structures are those related to the stack of the Collection Tree Protocol, i.e. the Link Estimator, the
- * Routing Engine and the Forwarding Engine; also it contains the data structure related to the Link layer
+ * Routing Engine and the Forwarding Engine; also it contains the data structure related to the Data Link layer and to
+ * the radio model
  */
 
 typedef struct _node_state{
 
+        /* RADIO FIELDS - start */
+
+        /*
+         * Bit-wise OR combinations of flags indicating the actual state of the radio transceiver (whether it is busy
+         * transmitting or receiving frames)
+         */
+
+        unsigned char radio_state;
+
+        /* RADIO FIELDS - end */
+
         /* LINK LAYER FIELDS - start */
 
-        unsigned char backoff_count; // Number of times the node experience a collision on the channel
+        unsigned char backoff_count; // Number of times the node experienced a collision on the channel and backed off
+        unsigned char free_channel_count; // Number of times that the node has "seen" the channel free
 
         /*
-         * Number of times that the channel has to be detected as free by the node before it starts transmitting
+         * Pointer to the packet being sent: if upper layers ask for the transmission of a new packet when this is not
+         * null, the link layers ignores the requests
          */
 
-        unsigned char free_channel_count;
-
-        /*
-         * Pointer to the packet being sent: if not null, the link layers drops packets from upper layers
-         */
-
-        ctp_data_packet* link_layer_sending;
+        ctp_data_packet* link_layer_outgoing;
+        bool link_layer_transmitting; // Boolean value telling whether the link layer is transmitting a frame
 
         /* LINK LAYER FIELDS - end */
 
@@ -235,14 +285,15 @@ typedef struct _node_state{
         /* ROUTING ENGINE FIELDS - start */
 
         /*
-         * ROUTING PACKET (BEACON)
-         *
-         * Next routing packet to be sent: it contains the routing information of the node, namely the expected number
-         * of hops necessary for him to deliver a message to the root of the collection tree
+         * The node has only one beacon at disposal at a time => it is necessary to use the following guard variable to
+         * avoid that two events handled from two different layers of the node concurrently access the beacon (for
+         * instance, the ROUTING ENGINE sets the fields of the beacon while the LINK LAYER is waiting for the backoff
+         * time)
          */
 
-        ctp_routing_packet routing_packet;
-        route_info route; // The route from the current node to the root
+        bool sending_beacon;
+        ctp_routing_packet routing_packet; // The routing packet of the node
+        route_info route; // Description of the route from the current node to the root
 
         /*
          * BEACONS INTERVAL/SENDING TIME
@@ -386,16 +437,19 @@ typedef struct _node_state{
 
         /* FORWARDING ENGINE FIELDS - end */
 
+        /* STATISTICS - start */
+
+        unsigned long parent_changes; // Number of times the node has changes its parent
+
+        /* STATISTICS - end */
+
         bool root; // Boolean variable that is set to true if the node is the designated root of the collection tree
-        node me; // ID and coordinates of this node (logical process)
+        unsigned int me; // ID of this node (logical process)
         unsigned char state; // Bit-wise OR combination of flags indicating the state of the node
         simtime_t lvt; // Value of the Local Virtual Time
 } node_state;
 
 void wait_until(unsigned int me,simtime_t timestamp,unsigned int type);
 void collected_data_packet(ctp_data_packet* packet);
-void broadcast_message(ctp_routing_packet* beacon,simtime_t time);
-void unicast_message(ctp_data_packet* packet,simtime_t time, unsigned int me);
-void send_ack(node_coordinates sender_coordinates,node recipient,simtime_t time);
 
 #endif
