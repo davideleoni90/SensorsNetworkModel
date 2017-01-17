@@ -7,7 +7,6 @@
  *
  * The forwarding engine has a FIFO queue of fixed depth at its disposal to store packets before forwarding them: here
  * packets are both those coming from other neighbors and those created by the node itself.
- * TODO we allow only one data packet at a time
  *
  * The forwarding engine waits for an acknowledgment for each packet sent => if this is not received within a certain
  * timeout, it tries to retransmit the packet for a limited number of times: if no acknowledgement is ever received, the
@@ -545,12 +544,6 @@ void start_forwarding_engine(node_state* state){
         state->data_packet_seqNo=0;
 
         /*
-         * Set the "type" field of the link layer frame in the data pacekt to CTP_DATA_PACKET
-         */
-
-        state->data_packet.link_frame.type=CTP_DATA_PACKET;
-
-        /*
          * Check if it's the root node: if not, schedule the sending of a data packet
          */
 
@@ -562,7 +555,7 @@ void start_forwarding_engine(node_state* state){
                  * The simulator is in charge of re-setting the timer every time it is fired
                  */
 
-                wait_until(state->me.ID,state->lvt+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
+                wait_until(state->me,state->lvt+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
 }
 
 /*
@@ -1011,6 +1004,8 @@ void receive_data_packet(void* message,node_state* state,simtime_t time) {
  */
 
 void forward_data_packet(ctp_data_packet* packet,node_state* state){
+
+        //TODO set link layer frame of packets being forwarded
 
         /*
          * Check that the forwarding is not empty: if so, the packet can't be stored in the forwarding pool and it has

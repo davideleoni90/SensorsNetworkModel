@@ -78,12 +78,6 @@ void start_routing_engine(node_state* state){
         state->sending_beacon=false;
 
         /*
-         * Set the "type" field of the link layer frame in the routing packet to CTP_BEACON
-         */
-
-        state->routing_packet.link_frame.type=CTP_BEACON;
-
-        /*
          * Initialize the route from this node to the root of the collection tree
          */
 
@@ -897,12 +891,6 @@ void send_beacon(node_state* state){
                 state->sending_beacon=true;
 
         }
-
-        /*
-         * Update the beacon sequence number
-         */
-
-        state->beacon_sequence_number+=1;
 }
 
 /*

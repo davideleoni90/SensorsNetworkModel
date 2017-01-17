@@ -20,9 +20,14 @@ enum{
 
 };
 
+void init_physical_layer(node_state* state);
+pending_transmission* add_pending_transmission(node_state* state, unsigned char type,void* frame, double power,
+                                               pending_transmission* last);
 void add_gain_entry(unsigned int source, unsigned int sink, double gain, double length);
 void add_noise_entry(unsigned int node, double noise_floor, double white_noise);
 unsigned int get_nodes();
+double compute_signal_strength(node_state* state);
 bool is_channel_free(node_state* state);
-void transmit_frame(node_state* state,ctp_data_packet* packet,simtime_t delivery_time);
+void transmit_frame(node_state* state,unsigned char type);
+void transmission_finished(node_state* state,pending_transmission* finished_transmission);
 #endif //SENSORSNETWORKMODELPROJECT_WIRELESS_LINKS_H

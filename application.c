@@ -65,6 +65,8 @@ extern noise_entry* noise_list;
 void read_input_file(const char* path);
 void start_routing_engine(node_state* state);
 bool is_failed(simtime_t now);
+void new_pending_transmission(node_state* state, double gain, unsigned char type,void* frame,double duration);
+void transmission_finished(node_state* state,pending_transmission* finished_transmission);
 
 /*
  * Application-level callback: this is the interface between the simulator and the model being simulated
@@ -82,7 +84,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
          * Index to iterate through nodes
          */
 
-        int i;
+        unsigned int i;
 
         /*
          * Initialize the local pointer to the pointer provided by the simulator
@@ -147,11 +149,11 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          * the memory address of the state object of processes, so it can transparently bring them back
                          * to a previous configuration in case of inconsistency problems.
                          *
-                         * Before the simulation can start, it is necessary to parse the topology file provided by the
-                         * user, containing the coordinates of all the nodes (and possibly also the ID of the node
-                         * chosen as root of the collection tree) => since this implies dynamic memory allocation, only
-                         * one node (the one with ID 0 or the one chosen by the user) performs this task, so the actual
-                         * start of the other nodes has to be deferred
+                         * Before the simulation can start, it is necessary to read the input file provided by the
+                         * user, containing the description of all the links of the node, the IDs of the nodes and their
+                         * level of local noise => since this implies dynamic memory allocation, only one node (the one
+                         * with ID 0 or the one chosen by the user) performs this task, so the actual start of the other
+                         * nodes has to be deferred
                          * => as soon as it has taken this step, an event (START_NODE) is broadcasted to all the other
                          * nodes: at this point they can properly start.
                          *
@@ -199,7 +201,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * The ID of the node
                                  */
 
-                                unsigned int root=GetParameterInt(event_content,"root");
+                                unsigned int root=(unsigned int)GetParameterInt(event_content,"root");
 
                                 /*
                                  * The user indicated the ID of the root node => check if it's valid and, if so, set
@@ -239,15 +241,16 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                         if(me==ctp_root){
 
-                                /* GET TOPOLOGY OF THE NETWORK (ONLY THE ROOT NODE) - start */
+                                /* READ INPUT FILE (ONLY THE ROOT NODE) - start */
 
                                 /*
-                                 * Parse the file containing the topology of the network: if this is not specified,
-                                 * return with error
+                                 * Parse the input file containing all the links of the network, including their gains,
+                                 * and the noise affecting all the nodes: if the path to the file is not given, return
+                                 * with error
                                  */
 
-                                if(IsParameterPresent(event_content, "topology")) {
-                                        parse_topology(GetParameterString(event_content, "topology"));
+                                if(IsParameterPresent(event_content, "input")) {
+                                        read_input_file(GetParameterString(event_content, "input"));
                                 }
                                 else{
                                         printf("[FATAL ERROR] The path a to file containing the topology of the network"
@@ -258,7 +261,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                         exit(EXIT_FAILURE);
                                 }
 
-                                /* GET NODES OF THE SIMULATION - end */
+                                /* READ INPUT FILE (ONLY THE ROOT NODE) - end */
 
                                 /*
                                  * Set the "root" flag in the state object
@@ -311,6 +314,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                          */
 
                         state->me=me;
+
+                        /* INIT PHYSICAL LAYER - start */
+
+                        init_physical_layer(state);
+
+                        /* INIT PHYSICAL LAYER - end */
 
                         /* INIT LINK LAYER - start */
 
@@ -443,6 +452,14 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                  *
                  */
 
+                /*
+                 *
+                 *
+                 * EVENTS SENT BY THE FORWARDING ENGINE - start
+                 *
+                 *
+                 */
+
                 case SEND_PACKET_TIMER_FIRED:
 
                         /*
@@ -486,99 +503,13 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         }
                         break;
 
-                case BEACON_RECEIVED:
-
-                        /*
-                         * If the node is not running, do nothing
-                         */
-
-                        if(state->state&RUNNING) {
-
-                                /*
-                                 * A beacon has been received => possibly update the neighbor and the routing table; the
-                                 * LINK ESTIMATOR first processes the beacon and then "forwards" it to the above ROUTING LAYER
-                                 */
-
-                                receive_routing_packet(event_content, state);
-                        }
-                        break;
-
-                //case DATA_PACKET_RECEIVED:
-
-                        /*
-                         * If the node is not running, do nothing
-                         */
-
-                        //if(state->state&RUNNING) {
-
-                                /*
-                                 * The node has received a data packet => let the FORWARDING ENGINE process it and send
-                                 * an ack to the sender
-                                 */
-
-                                //receive_data_packet((ctp_data_packet *) event_content, state,now);
-                        //}
-                        //break;
-
-                case DATA_PACKET_DELIVERED:
-
-                        /*
-                         * Check if the node can receive a data packet sent by another node.
-                         * If it's not running, the packet will never be received
-                         */
-
-                        if(state->state&RUNNING) {
-
-                                /*
-                                 * Compute the strength of the signal carrying the packet received by the recipient.
-                                 * This is equal to the strength of the signal representing the noise of the environment
-                                 * plus the strength of the signal associated to the transmission
-                                 */
-
-                                double signal_strength=compute_signal_strenght(me);
-                        }
-                        break;
-
-                case ACK_RECEIVED:
-
-                        /*
-                         * If the node is not running, do nothing
-                         */
-
-                        if(state->state&RUNNING) {
-
-                                /*
-                                 * The recipient of the last data packet sent has received it and has replied with an ack,
-                                 * which has been successfully delivered on its turn => signal the event to the forwarding
-                                 * engine: this will remove the last packet from the head of the output queue and will also
-                                 * inform the link estimator
-                                 */
-
-                                receive_ack(true, state);
-                        }
-                        break;
-
-                case CHECK_ACK_RECEIVED:
-
-                        /*
-                         * If the node is not running, do nothing
-                         */
-
-                        if(state->state&RUNNING) {
-
-                                /*
-                                 * When a node sends or forwards a data packet, this is not removed from the output
-                                 * queue until an acknowledgment for the packet is received.
-                                 * The node does not wait the acknowledgement forever, but just for a timeout time =>
-                                 * this event is processed by a node, when the timeout time has elapsed, in order to
-                                 * check whether the ack has been received for not.
-                                 * The fact that an acknowledgment has been received or not is determined comparing the
-                                 * last data packet in the output queue with the one attached to the event
-                                 */
-
-                                is_ack_received(state, (ctp_data_packet *) event_content);
-                        }
-                        break;
+                /*
+                 *
+                 *
+                 * EVENTS SENT BY THE FORWARDING ENGINE - end
+                 *
+                 *
+                 */
 
                 /*
                  *
@@ -633,7 +564,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         if(state->state&RUNNING) {
 
                                 /*
-                                 * This event is delivered to a node by itself when the transmission of a frame is over
+                                 * This event is delivered to a node by itself when the transmission of a frame is over:
+                                 * if the frame contained a data packet, the node has to check whether this hase been
+                                 * acknowledged
                                  */
 
                                 frame_transmitted(state);
@@ -646,6 +579,65 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                  *
                  *
                  */
+
+                /*
+                 *
+                 * EVENTS SENT BY THE PHYSICAL LAYER - start
+                 *
+                 *
+                 */
+
+                case BEACON_TRANSMISSION_STARTED:
+
+                        /*
+                         * There's a new incoming frame destined to the current node => determine if the node is
+                         * capable of receiving the frame. Even though this is not the case, keep track of the
+                         * associated transmission because it's sensed by the radio transceiver of the node and it may
+                         * interfere with other frames transmissions.
+                         */
+
+                        new_pending_transmission(state,((ctp_routing_packet*)event_content)->link_frame.gain,
+                                                 CTP_BEACON,event_content,
+                                                 ((ctp_routing_packet*)event_content)->link_frame.duration);
+
+                        break;
+
+                case TRANSMISSION_FINISHED:
+
+                        /*
+                         * The transmission of the beacon has come to an end => the associated signal is no longer
+                         * perceived by the node. If the signal was strong enough, the node received the frame and
+                         * starts processing it.
+                         */
+
+                        transmission_finished(state,(pending_transmission*)event_content);
+                        break;
+
+                case ACK_RECEIVED:
+
+                        /*
+                         * If the node is not running, do nothing
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * The recipient of the last data packet sent has received it and has replied with an ack,
+                                 * which has been successfully delivered on its turn => signal the event to the forwarding
+                                 * engine: this will remove the last packet from the head of the output queue and will also
+                                 * inform the link estimator
+                                 */
+
+                                receive_ack(true, state);
+                        }
+                        break;
+
+                        /*
+                         *
+                         * EVENTS SENT BY THE PHYSICAL LAYER - end
+                         *
+                         *
+                         */
 
                 default:
                         printf("Events not handled\n");
@@ -976,7 +968,7 @@ void read_input_file(const char* path){
                          * Store token
                          */
 
-                        sscanf(token,"%lf",tokens[index]);
+                        sscanf(token,"%lf",&tokens[index]);
 
                         /*
                          * Increment the index
@@ -1017,7 +1009,7 @@ void read_input_file(const char* path){
                          * Convert the token into a double
                          */
 
-                        sscanf(token,"%lf",length);
+                        sscanf(token,"%lf",&length);
 
                         /*
                          * The current line describes the gain of a link

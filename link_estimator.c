@@ -792,7 +792,13 @@ bool send_routing_packet(node_state* state){
          * increment the sequence number itself
          */
 
-        link_estimator_frame->seq=state->routing_packet.;
+        link_estimator_frame->seq=state->beacon_sequence_number;
+
+        /*
+         * Update the beacon sequence number
+         */
+
+        state->beacon_sequence_number+=1;
 
         /*
          * At this point the beacon is well formed, so it's time to send it to the neighbour nodes => ask the link
@@ -1464,22 +1470,4 @@ void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimat
 
                         update_outgoing_quality(entry);
         }
-}
-
-void print_link_estimator_table(node_state* state){
-        link_estimator_table_entry* table=state->link_estimator_table;
-        int i;
-        printf("###############################\n\n");
-        printf("Estimator table for node %d\n",state->me);
-        printf("Number of neighbors:%d\n",state->neighbors);
-        printf("Parent:%d\n",state->route.parent);
-        printf("Etx:%d\n",state->route.etx);
-        for(i=0;i<state->neighbors;i++){
-                printf("Neighbor:%d lastseq:%d received:%d missed:%d inquality:%d etx:%d\n",
-                table[i].neighbor,table[i].lastseq,table[i].beacons_received,table[i].beacons_missed,
-                        table[i].ingoing_quality,table[i].one_hop_etx);
-                printf("Data sent:%d acks received:%d\n",table[i].data_sent,table[i].data_acknowledged);
-        }
-        printf("###############################\n\n");
-        fflush(stdout);
 }

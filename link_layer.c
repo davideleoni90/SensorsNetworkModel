@@ -2,6 +2,7 @@
 #include "link_layer.h"
 #include "wireless_links.h"
 
+
 /*
  * LINK LAYER
  *
@@ -56,32 +57,43 @@ void init_link_layer(node_state* state){
 
         state->data_packet.link_frame.src=state->me;
         state->routing_packet.link_frame.src=state->me;
+}
 
+/*
+ * GET FRAME
+ * The LINK ESTIMATOR and the FORWARDING ENGINE are "wired" to the LINK LAYER using the same interface for sending
+ * different types of packets, brodcast messages and unicast messages (that require an acknowledgment) respectively:
+ * they only provide the type of the packet to be transmitted, so the link layer has to set the pointer to the link
+ * layer frame of the next packet to be transmitted => this function performs this task
+ *
+ * @state: pointer to the object representing the current state of the node
+ * @type: the type of the packet to be transmitted (either CTP_BEACON or CTP_DATA_PACKET)
+ *
+ */
 
-        /*
-         * Set the type of the beacon to CTP_BEACON: this is needed by the link layer to determine whether the
-         * packet should be broadcasted or unicasted
-         */
-
-        state->routing_packet.link_frame.type=CTP_BEACON;
-
-        /*
-         * Set the type of the data packe to CTP_DATA_PACKET
-         */
-
-        state->data_packet.link_frame.type=CTP_DATA_PACKET;
-
-        /*
-         * Beacons don't need to be acknowledged, so clear the corresponding flag
-         */
-
-        state->routing_packet.link_frame.wait_ack=false;
+void get_frame(node_state* state,unsigned char type){
 
         /*
-         * Data packets need to be acknowledged, so set the corresponding flag
+         * Check the type of the packet
          */
 
-        state->data_packet.link_frame.wait_ack=true;
+        if(type==CTP_BEACON){
+
+                /*
+                 * The packet is a beacon => set link_layer_outgoing to the link layer frame of beacon of the node
+                 */
+
+                state->link_layer_outgoing=&state->routing_packet.link_frame;
+        }
+        else{
+
+                /*
+                 * The packet is a data packet => set link_layer_outgoing to the link layer frame of the head of the
+                 * output queue; also save the type in the corresponding variable of the state
+                 */
+
+                state->link_layer_outgoing=&state->forwarding_queue[state->forwarding_queue_head]->packet.link_frame;
+        }
 }
 
 /*
@@ -247,7 +259,7 @@ void check_channel(node_state* state){
                  * Tell the layer that requested the transmission that the packet had to be dropped
                  */
 
-                if(state->link_layer_outgoing->link_frame.type==CTP_BEACON){
+                if(state->link_layer_outgoing_type==CTP_BEACON){
 
                         /*
                          * The packet is a beacon => inform the ROUTING ENGINE
@@ -280,6 +292,12 @@ void check_channel(node_state* state){
 void start_frame_transmission(node_state* state){
 
         /*
+         * Get the type of the frame to be transmitted, either CTP_BEACON or CTP_DATA_PACKET
+         */
+
+        unsigned char type=state->link_layer_outgoing_type;
+
+        /*
          * Duration of the transmission of the frame, i.e. the number of simulation ticks it takes for the neighbour
          * nodes to successfully receive a packet (including the time to transmit an acknowledgment, if required)
          * This depends on the number of bytes in the data frame (comprising the preamble added by the physical layer)
@@ -289,7 +307,7 @@ void start_frame_transmission(node_state* state){
          * First get the length of the payload in bits (sizeof returns the length in bytes and 1 byte=8 bits)
          */
 
-        double bits_length=sizeof(state->data_packet)*8;
+        double bits_length=sizeof(state->link_layer_outgoing)*8;
 
         /*
          * Then set the duration of the transmission to the number of symbols in the frame
@@ -309,7 +327,7 @@ void start_frame_transmission(node_state* state){
          * the sending of the frame)
          */
 
-        if(state->data_packet.link_frame.wait_ack)
+        if(type==CTP_DATA_PACKET)
                 duration+=CSMA_ACK_TIME;
 
         /*
@@ -319,11 +337,17 @@ void start_frame_transmission(node_state* state){
         duration*=(TICKS_PER_SEC/CSMA_SYMBOLS_PER_SEC);
 
         /*
+         * Set the duration of the transmission in the link layer frame of the packet
+         */
+
+        state->link_layer_outgoing->duration=duration;
+
+        /*
          * Start the transmission of the frame using the radio transceiver: the last parameter is the virtual time when
          * the nodes that have successfully received the packet will start processing it
          */
 
-        transmit_frame(state,state->link_layer_outgoing,state->lvt+duration);
+        transmit_frame(state,type);
 
         /*
          * As regards with the sender node, the time necessary for switching the radio from transmission to the
@@ -334,13 +358,13 @@ void start_frame_transmission(node_state* state){
 
         /*
          * Clear the "wait_ack" flag in the packet sent
-         * TODO check if necessary
+         * TODO CHECK
          */
 
         //state->data_packet.link_frame.wait_ack=false;
 
         /*
-         * Schedule a new event to signal that the transmission is finished
+         * Schedule a new event to signal that the transmission is finished and acknowledgment should have been received
          */
 
         wait_until(state->me,state->lvt+duration,FRAME_TRANSMITTED);
@@ -362,64 +386,29 @@ void start_frame_transmission(node_state* state){
 bool send_frame(node_state* state,unsigned int recipient, unsigned char type){
 
         /*
-         * Pointer to the data link frame of the packet that is being sent
-         */
-
-        link_layer_frame* data_link_frame;
-
-        /*
-         * First check that the link layer is not already busy sending another packet: if so, return
+         * First check that the link layer is not already busy sending another packet: if so, return false
          */
 
         if(state->link_layer_outgoing)
                 return false;
 
         /*
-         * It's possible to start transmitting the frame => determine if the packet to be sent is a data packet or a
-         * beacon
+         * The link layer is not busy => get the pointer to the link layer frame of the new packet to be transmitted
          */
 
-        switch (type){
+        get_frame(state,type);
 
-                case CTP_BEACON:
+        /*
+         * Save the type of the frame in the corresponding variable of the state
+         */
 
-                        /*
-                         * Extract the data link frame from the beacon
-                         */
-
-                        data_link_frame=&state->routing_packet.link_frame;
-
-                        /*
-                         * Set the "link_layer_outgoing" field of the state to the beacon being sent
-                         */
-
-                        state->link_layer_outgoing=&state->routing_packet;
-
-                        break;
-
-                case CTP_DATA_PACKET:
-
-                        /*
-                         * Extract the data link frame from the data packet
-                         */
-
-                        data_link_frame=&state->data_packet.link_frame;
-
-                        /*
-                         * Set the "link_layer_outgoing" field of the state to the data packet being sent
-                         */
-
-                        state->link_layer_outgoing=&state->data_packet;
-
-
-                        break;
-        }
+        state->link_layer_outgoing_type=type;
 
         /*
          * Set the ID of the destination node in the link layer frame
          */
 
-        data_link_frame->sink=recipient;
+        state->link_layer_outgoing->sink=recipient;
 
         /*
          * Set the number of times the nodes wants to see the channel free before transmitting the packet
@@ -455,13 +444,19 @@ void frame_transmitted(node_state* state){
          * Get the type of the packet transmitted
          */
 
-        unsigned char type=state->link_layer_outgoing->link_frame.type;
+        unsigned char type=state->link_layer_outgoing_type;
 
         /*
          * Clear the pointer to the frame being transmitted
          */
 
         state->link_layer_outgoing=NULL;
+
+        /*
+         * Clear the variable related to the type of the last frame sent
+         */
+
+        state->link_layer_outgoing_type=0;
 
         /*
          * Clear the flag indicating that the node is transmitting a frame
@@ -485,8 +480,55 @@ void frame_transmitted(node_state* state){
 
                 /*
                  * Clear the flag indicating the transmission of a data packet
+                 * TODO check if ack received
                  */
 
                 state->sending_data_packet=false;
+        }
+}
+
+/*
+ * FRAME RECEIVED
+ *
+ * This function is called by the physical layer when the node has received a new frame => this layer is in charge of
+ * informing either the LINK ESTIMATOR or the FORWARDING ENGINE about this event, depending if the frame contains a
+ * beacon or a data packet respectively.
+ * The frame can be received only if the node is not busy sending a frame on its own
+ *
+ * @state: pointer to the object representing the current state of the node
+ * @frame: pointer to the frame received
+ * @type: either CTP_BEACON or CTP_DATA_PACKET
+ */
+
+void frame_received(node_state* state,void* frame, unsigned char type){
+
+        /*
+         * Check if the node is transmitting: if so, return
+         */
+
+        if(state->link_layer_transmitting)
+                return;
+
+        /*
+         * Parse the frame depending on the type
+         */
+
+        if(type==CTP_BEACON){
+
+                /*
+                 * The frame contains a beacon => pass it to the LINK ESTIMATOR
+                 */
+
+                receive_routing_packet(frame,state);
+
+        }
+        else{
+
+                /*
+                 * The frame contains a data packet => pass it to the ROUTING ENGINE
+                 */
+
+                receive_data_packet(frame,state);
+
         }
 }

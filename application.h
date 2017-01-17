@@ -5,6 +5,7 @@
 #include "routing_engine.h"
 #include "forwarding_engine.h"
 #include <ROOT-Sim.h>
+#include <bits/mathdef.h>
 
 /*
  * EVENT TYPES
@@ -24,13 +25,17 @@ enum{
         UPDATE_ROUTE_TIMER_FIRED=4, // The timer for updating the route has been fired
         SET_BEACONS_TIMER=5, // The interval of the timer for beacons has to be updated
         DATA_PACKET_DELIVERED=6, // The node has been delivered a data packet => check if it can be received
-        BEACON_RECEIVED=7, // The node has received a data packet
-        RETRANSMITT_DATA_PACKET=8, // Try to re-send a data packet whose first sending attempt failed
-        CHECK_ACK_RECEIVED=9, // Check whether the last data packet sent has been acknowledged or not
-        ACK_RECEIVED=10, // The ack for the last data packet sent has just been received
-        CHECK_CHANNEL_FREE=11, // The link layer has to check whether the channel is free
-        START_FRAME_TRANSMISSION=12, // The link layer starts to transmit a frame over the channel
-        FRAME_TRANSMITTED=13 // The frame has been transmitted
+        RECEIVE_BEACON=7, // The node has been delivered a beacon reception event=> check if it can be received
+        RECEIVE_DATA_PACKET=8, // The node has been delivered a data packet reception event=> check if it can be received
+        RETRANSMITT_DATA_PACKET=9, // Try to re-send a data packet whose first sending attempt failed
+        CHECK_ACK_RECEIVED=10, // Check whether the last data packet sent has been acknowledged or not
+        ACK_RECEIVED=11, // The ack for the last data packet sent has just been received
+        CHECK_CHANNEL_FREE=12, // The link layer has to check whether the channel is free
+        START_FRAME_TRANSMISSION=13, // The link layer starts to transmit a frame over the channel
+        FRAME_TRANSMITTED=14, // The frame has been transmitted
+        BEACON_TRANSMISSION_STARTED=15, // The transmission of a new frame containing a beacon has started
+        DATA_PACKET_TRANSMISSION_STARTED=16, // The transmission of a new frame containing a beacon has started
+        TRANSMISSION_FINISHED=17, // The transmission of a new frame has finished
 };
 
 /*
@@ -40,7 +45,7 @@ enum{
  */
 
 enum {
-        RADIO_SENDING=0x1, // The radio is busy sending a frame
+        RADIO_TRANSMITTING=0x1, // The radio is busy transmitting a frame
         RADIO_RECEIVING=0x2 // The radio is busy receiving a frame
 };
 
@@ -90,15 +95,14 @@ enum{
 typedef struct _link_layer_frame{
         unsigned int src; // ID of the node that sends the frame
         unsigned int sink; // ID of the node the frame is destined to
-        double gain; // Gain of the sender node
-        bool wait_ack; // Boolean flag indicating whether the node has to wait for the acknowledgment of a packet sent
 
         /*
-         * Type of the packet: beacon or data packet. This piece of information is used to by the LINK LAYER to decide
-         * whether the packet should be transmitted as a broadcast message or a unicast message respectively
+         * Gain of the sender node: this is used by the simulator to determine whether the a frame will be received by
+         * a node or not
          */
 
-        unsigned char type;
+        double gain;
+        double duration; // Time necessary to deliver the packet; this depends on the size of the packet
 }link_layer_frame;
 
 /*
@@ -203,7 +207,6 @@ typedef struct _gain_entry{
         double gain; // Gain associated to the link
         unsigned int sink; // ID of the sink node of the link
         double distance; // The length of the link, i.e. the euclidean distance between its vertices
-        bool up; // Boolean value indicating whether the link is up; it goes down when the node crashes
         struct gain_entry* next; // Pointer to the next entry in the list of gains
 }gain_entry;
 
@@ -222,6 +225,24 @@ typedef struct _noise_entry{
 }noise_entry;
 
 /*
+ * PENDING TRANSMISSION
+ *
+ * Data structure representing the transmission of a frame.
+ * More than one frame may be sent to a node at the same time, but it will receive only the one associated with the
+ * strongest signal, given that the strength is greater than the noise affecting the node
+ */
+
+typedef struct _pending_transmission{
+        //simtime_t start_time; // Value of the virtual time when the transmission was initiated by the sender
+        //simtime_t end_time; // Value of the virtual time when the transmission is expected to finish
+        void* frame; // Pointer to the frame carried by the signal
+        unsigned char frame_type; // The type of the frame, either CTP_BEACON or CTO_DATA_PACKET
+        double power; // The strength of the transmission
+        bool lost; // Boolean value set to true in case a stronger transmission comes and hides the current one
+        struct pending_transmission* next; // Pointer to the next element in the list of pending transmissions
+}pending_transmission;
+
+/*
  * NODE STATE
  *
  * Structure representing the state of a node (logic process) at any point in the virtual time.
@@ -233,6 +254,34 @@ typedef struct _noise_entry{
 typedef struct _node_state{
 
         /* RADIO FIELDS - start */
+
+        /*
+         * PENDING TRANSMISSIONS
+         *
+         * This is the pointer to the first element of a list that keeps track of all the incoming frame transmissions.
+         */
+
+        pending_transmission* pending_transmissions;
+
+        /*
+         * PENDING TRANSMISSIONS POWER
+         *
+         * This variable holds the sum of the power of signals associated to all the packets that have been transmitted
+         * to this node and have not been received yet. As soon as a packet is received by the node, the associated
+         * signal no longer exists, so the corresponding power is subtracted from this variable.
+         * When a node checks whether the channel is free, it checks whether the power of the signal resulting from all
+         * the ongoing transmission is below a threshold: if so, the channel is regarded as free, otherwise it is
+         * regarded as busy and the node backs off
+         */
+
+        double pending_transmissions_power;
+
+        /*
+         * Pointer to the frame being sent: if upper layers ask for the transmission of a new frame and this is not
+         * NULL, the radio transceiver ignores the requests
+         */
+
+        void* radio_outgoing;
 
         /*
          * Bit-wise OR combinations of flags indicating the actual state of the radio transceiver (whether it is busy
@@ -249,11 +298,17 @@ typedef struct _node_state{
         unsigned char free_channel_count; // Number of times that the node has "seen" the channel free
 
         /*
-         * Pointer to the packet being sent: if upper layers ask for the transmission of a new packet when this is not
-         * null, the link layers ignores the requests
+         * Pointer to the link layer frame of the next packet to be sent: if upper layers ask for the transmission of a
+         * new packet and this point is not set to NULL, the link layer ignores the requests
          */
 
-        ctp_data_packet* link_layer_outgoing;
+        link_layer_frame* link_layer_outgoing;
+
+        /*
+         * Flag indicating whether the frame that is being sent is a beacon or a data packet
+         */
+
+        unsigned char link_layer_outgoing_type;
         bool link_layer_transmitting; // Boolean value telling whether the link layer is transmitting a frame
 
         /* LINK LAYER FIELDS - end */

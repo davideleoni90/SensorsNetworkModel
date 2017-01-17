@@ -71,7 +71,14 @@ enum{
          * Adding the 12 symbols delay, the total number of symbols for the reception of an ack is 34
          */
 
-        CSMA_ACK_TIME=34
+        CSMA_ACK_TIME=34,
+
+        /*
+         * The strength of a signal has to be weaker by at most this value than the strength of the interferences for
+         * the signal to be received by the radio transceiver of a node
+         */
+
+        CSMA_SENSITIVITY=4.0
 };
 
 /*
@@ -81,6 +88,7 @@ enum{
 void start_frame_transmission(node_state* state);
 bool send_frame(node_state* state,unsigned int recipient, unsigned char type);
 void frame_transmitted(node_state* state);
+void frame_received(node_state* state,void* frame, unsigned char type);
 void check_channel(node_state* state);
 void init_link_layer(node_state* state);
 #endif //SENSORSNETWORKMODELPROJECT_LINK_LAYER_H
