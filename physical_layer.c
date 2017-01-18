@@ -1,13 +1,13 @@
 #include <bits/mathcalls.h>
-#include "wireless_links.h"
+#include "physical_layer.h"
 #include "link_estimator.h"
 #include "application.h"
 #include "link_layer.h"
 
 /*
- * WIRELESS LINKS MODEL
+ * PHYSICAL LAYER MODEL
  *
- * This piece of code models the behaviour of wireless links. This depends on two elements:
+ * This piece of code models the behaviour of the physical layer. This depends on two elements:
  *
  * 1-the radio
  * 2-the surrounding environment (channel)
@@ -21,6 +21,18 @@
  * network => a channel is considered free only if the total power of the signal representing such a noise is below a
  * threshold.
  */
+
+/* GLOBAL VARIABLES - start
+ *
+ * Default values of the parameters for the physical layer (check physical_layer.h for a description)
+ */
+
+double white_noise_mean=WHITE_NOISE_MEAN;
+double channel_free_threshold=CHANNEL_FREE_THRESHOLD;
+
+/* GLOBAL VARIABLES - end */
+
+extern unsigned int csma_sensitivity;
 
 /*
  * GAIN ADJACENCY LIST
@@ -45,6 +57,18 @@ gain_entry** gains_list;
 noise_entry* noise_list;
 
 extern FILE* file;
+
+/*
+ * PARSE SIMULATION PARAMETERS FOR THE PHYSICAL LAYER
+ */
+
+void parse_physical_layer_parameters(void* event_content){
+
+        if(IsParameterPresent(event_content, "white_noise_mean"))
+                white_noise_mean=GetParameterDouble(event_content,"white_noise_mean");
+        if(IsParameterPresent(event_content, "channel_free_threshold"))
+                channel_free_threshold=GetParameterDouble(event_content,"channel_free_threshold");
+}
 
 /*
  * INIT RADIO
@@ -90,7 +114,7 @@ void init_physical_layer(node_state* state){
  * Returns the address of the new instance
  */
 
-pending_transmission* add_pending_transmission(node_state* state, unsigned char type,void* frame, double power,
+pending_transmission* add_pending_transmission(unsigned char type,void* frame, double power,
                               pending_transmission* last){
 
         /*
@@ -125,12 +149,6 @@ pending_transmission* add_pending_transmission(node_state* state, unsigned char 
 
                 new_transmission->frame_type=CTP_DATA_PACKET;
         }
-
-        /*
-         * Set the start time of the transmission to the current value of the virtual time
-         */
-
-        //new_transmission->start_time=state->lvt;
 
         /*
          * Set the frame associated with the transmission
@@ -177,12 +195,11 @@ pending_transmission* add_pending_transmission(node_state* state, unsigned char 
  * @source: ID of the source node of the link
  * @sink: ID of the sink node of the link
  * @gain: gain of the link
- * @length: euclidean distance between the vertices of the link
  *
  * The function aborts the simulation if any of the parameters is not valid
  */
 
-void add_gain_entry(unsigned int source, unsigned int sink, double gain, double length){
+void add_gain_entry(unsigned int source, unsigned int sink, double gain){
 
         /*
          * Pointer to the new instance of gain_entry
@@ -217,12 +234,6 @@ void add_gain_entry(unsigned int source, unsigned int sink, double gain, double 
          */
 
         entry->sink=sink;
-
-        /*
-         * Set the length of the link
-         */
-
-        entry->distance=length;
 
         /*
          * Set the pointer to the next element to NULL
@@ -382,7 +393,7 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
                  * is dropped
                  */
 
-                if(channel_strength+CSMA_SENSITIVITY<gain){
+                if(channel_strength+csma_sensitivity<gain){
 
                         /*
                          * The signal carrying the frame has enough power for the frame to be received
@@ -418,7 +429,7 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
                  * new one is below the threshold, the former is lost
                  */
 
-                if(current->power-CSMA_SENSITIVITY<gain)
+                if(current->power-csma_sensitivity<gain)
                         current->lost=true;
 
                 /*
@@ -440,7 +451,7 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
          * Add the new transmission at the end of the list and get the address
          */
 
-        current=add_pending_transmission(state,type,frame,gain,current);
+        current=add_pending_transmission(type,frame,gain,current);
 
         /*
          * Schedule a new event corresponding to the moment when the transmission will be finished
@@ -467,7 +478,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          * Pointer to the element of the list that points to the transmission that is now finished
          */
 
-        pending_transmission* predecessor;
+        pending_transmission* predecessor=NULL;
 
         /*
          * Type of the content of the frame transmitted
@@ -513,7 +524,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                  */
 
                 if(current_transmission!=finished_transmission){
-                        if(current_transmission->power-CSMA_SENSITIVITY<finished_transmission->power){
+                        if(current_transmission->power-csma_sensitivity<finished_transmission->power){
                                 current_transmission->lost=true;
                         }
                 }
@@ -552,7 +563,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          * transmission will be missed by the node too
          */
 
-        if(finished_transmission->power-CSMA_SENSITIVITY<state->pending_transmissions_power)
+        if(finished_transmission->power-csma_sensitivity<state->pending_transmissions_power)
                 finished_transmission->lost=true;
 
         /*
@@ -735,6 +746,12 @@ void transmit_frame(node_state* state,unsigned char type){
                         ScheduleNewEvent(sink,state->lvt,DATA_PACKET_TRANSMISSION_STARTED,state->radio_outgoing,
                                          sizeof(ctp_data_packet));
                 }
+
+                /*
+                 * Go to next entry
+                 */
+
+                gain_entry=gain_entry->next;
         }
 }
 
@@ -742,7 +759,7 @@ void transmit_frame(node_state* state,unsigned char type){
  * GET CURRENT NOISE
  *
  * This function simulates the variability of the noise affecting a node by returning a random value from the uniform
- * distribution [white_noise_mean-noise_range,white_noise_mean+noise_range]
+ * distribution [white_noise_mean-noise_range,white_noise_mean+noise_range] and adding to the value pf the noise floor
  */
 
 double get_current_noise(unsigned int node){
@@ -751,7 +768,7 @@ double get_current_noise(unsigned int node){
          * Get the mean value of the dynamic component of the noise
          */
 
-        double mean=WHITE_NOISE_MEAN;
+        double mean=white_noise_mean;
 
         /*
          * Get a random value to be added to the mean value of the dynamic component of the noise
@@ -767,7 +784,7 @@ double get_current_noise(unsigned int node){
          * uniform distribution
          */
 
-        return mean+rand;
+        return mean+rand+noise_list[node].noise_floor;
 }
 
 
@@ -831,11 +848,13 @@ bool is_channel_free(node_state* state){
          * Get the strength of the signal occupying the channel at the moment
          */
 
-        double signal_strength=compute_signal_strength(state->me);
+        double signal_strength=compute_signal_strength(state);
 
         /*
          * Return true if the strength is less than the threshold, false otherwise
          */
 
-        return signal_strength<CHANNEL_FREE_THRESHOLD;
+        if(signal_strength<channel_free_threshold)
+                return true;
+        return false;
 }

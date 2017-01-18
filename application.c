@@ -4,14 +4,17 @@
 #include <ROOT-Sim.h>
 #include "application.h"
 #include "forwarding_engine.h"
-#include "wireless_links.h"
+#include "physical_layer.h"
 #include "link_layer.h"
 #include <math.h>
 #include <limits.h>
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
-double collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
+unsigned long collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
+unsigned long collected_packets_goal=COLLECTED_DATA_PACKETS_GOAL;
+unsigned long max_simulation_time=MAX_TIME;
+unsigned long long ticks_per_sec=TICKS_PER_SEC;
 
 /*
  * The vector containing a counter of packets received by the root of the collection tree from the other nodes
@@ -57,12 +60,15 @@ double failure_threshold=0.9;
 
 extern gain_entry* gains_list;
 extern noise_entry* noise_list;
+extern unsigned int update_route_timer;
+extern unsigned int send_packet_timer;
 
 /* GLOBAL VARIABLES (shared among all logical processes) - end */
 
 /* FORWARD DECLARATIONS */
 
 void read_input_file(const char* path);
+void parse_simulation_parameters(void* event_content);
 void start_routing_engine(node_state* state);
 bool is_failed(simtime_t now);
 void new_pending_transmission(node_state* state, double gain, unsigned char type,void* frame,double duration);
@@ -264,6 +270,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 /* READ INPUT FILE (ONLY THE ROOT NODE) - end */
 
                                 /*
+                                 * Now parse all the other parameters of the simulation
+                                 */
+
+                                parse_simulation_parameters(event_content);
+
+                                /*
                                  * Set the "root" flag in the state object
                                  */
 
@@ -390,7 +402,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * same amount of time, starting from now
                                  */
 
-                                wait_until(me, now + ((UPDATE_ROUTE_TIMER/1000)*TICKS_PER_SEC),
+                                wait_until(me, now + ((update_route_timer/1000)*ticks_per_sec),
                                            UPDATE_ROUTE_TIMER_FIRED);
                         }
                         break;
@@ -482,7 +494,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * of time, starting from now
                                  */
 
-                                wait_until(me, now + (TICKS_PER_SEC/SEND_PACKET_TIMER), SEND_PACKET_TIMER_FIRED);
+                                wait_until(me, now + (ticks_per_sec/send_packet_timer), SEND_PACKET_TIMER_FIRED);
                         }
                         break;
 
@@ -702,7 +714,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
 
                 if(((int)(((node_state*)snapshot)->lvt)%MAX_TIME==0) &&( ((node_state*)snapshot)->lvt>1)){
                         printf("\n\nSimulation stopped because reached the limit of time:%f\n"
-                                       "Packets collected by root:%f\n"
+                                       "Packets collected by root:%lu\n"
                                 ,((node_state*)snapshot)->lvt,collected_packets);
                         for(i=0;i<n_prc_tot;i++) {
                                 if(i==ctp_root)
@@ -759,14 +771,14 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                  */
 
                                 continue;
-                        if (collected_packets_list[i] <COLLECTED_DATA_PACKETS_GOAL) {
+                        if (collected_packets_list[i] <collected_packets_goal) {
                                 fflush(stdout);
                                 return false;
                         }
                 }
-                printf("\n\nSimulation stopped because at least %d packets have been collected from each node\n"
-                               "Time:%f\nPackets collected by root:%f\n"
-                        ,COLLECTED_DATA_PACKETS_GOAL,((node_state*)snapshot)->lvt,collected_packets);
+                printf("\n\nSimulation stopped because at least %lu packets have been collected from each node\n"
+                               "Time:%f\nPackets collected by root:%lu\n"
+                        ,collected_packets_goal,((node_state*)snapshot)->lvt,collected_packets);
 
                 /*
                  * Print packets collected from each node
@@ -915,7 +927,6 @@ void read_input_file(const char* path){
                  * 1-ID of the source node of the link
                  * 2-ID of the sink node of the link
                  * 3-gain of the link
-                 * 4-length of the link
                  */
 
                 double tokens[3];
@@ -985,38 +996,10 @@ void read_input_file(const char* path){
                 if(strcmp(line_type,"gain")){
 
                         /*
-                         * The length of the link to be parsed
-                         */
-
-                        double length;
-
-                        /*
-                         * Get the last token (length of the link)
-                         */
-
-                        char* token=strtok(lineptr,"\t");
-
-                        /*
-                         * Check if the last token is valid too
-                         */
-
-                        if(!token){
-                                printf("[FATAL ERROR] Line %i of the file is not well formed\n", lines);
-                                fclose(file);
-                                exit(EXIT_FAILURE);
-                        }
-
-                        /*
-                         * Convert the token into a double
-                         */
-
-                        sscanf(token,"%lf",&length);
-
-                        /*
                          * The current line describes the gain of a link
                          */
 
-                        add_gain_entry((unsigned  int)tokens[0],(unsigned  int)tokens[1],tokens[2],length);
+                        add_gain_entry((unsigned  int)tokens[0],(unsigned  int)tokens[1],tokens[2]);
                 }
                 else{
 
@@ -1057,6 +1040,32 @@ void read_input_file(const char* path){
                        n_prc_tot-get_nodes());
                 exit(EXIT_FAILURE);
         }
+}
+
+/*
+ * PARSE SIMULATION PARAMETERS
+ *
+ * Parse all the simulation parameters other than the "root" of the network and the path of the input file: if these are
+ * not specified by the user, their default value is used
+ */
+
+void parse_simulation_parameters(void* event_content) {
+
+        parse_physical_layer_parameters(event_content);
+        parse_link_layer_parameters(event_content);
+        parse_link_estimator_parameters(event_content);
+        parse_routing_engine_parameters(event_content);
+        parse_forwarding_engine_parameters(event_content);
+        if(IsParameterPresent(event_content, "failure_lambda"))
+                failure_lambda=GetParameterDouble(event_content,"failure_lambda");
+        if(IsParameterPresent(event_content, "failure_threshold"))
+                failure_lambda=GetParameterDouble(event_content,"failure_threshold");
+        if(IsParameterPresent(event_content, "ticks_per_sec"))
+                ticks_per_sec=(unsigned long long)GetParameterInt(event_content,"ticks_per_sec");
+        if(IsParameterPresent(event_content, "max_simulation_time"))
+                max_simulation_time=(unsigned long long)GetParameterInt(event_content,"max_simulation_time");
+        if(IsParameterPresent(event_content, "collected_packets_goal"))
+                collected_packets_goal=(unsigned long long)GetParameterInt(event_content,"collected_packets_goal");
 }
 
 /*

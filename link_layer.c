@@ -1,6 +1,6 @@
 #include <bits/mathcalls.h>
 #include "link_layer.h"
-#include "wireless_links.h"
+#include "physical_layer.h"
 
 
 /*
@@ -34,6 +34,63 @@
  * The initial value for the backoff time is selected in the range [CSMA_INIT_LOW,CSMA_INIT_HIGH]
  * TODO conclude description
  */
+
+/* GLOBAL VARIABLES - start
+ *
+ * Default values of the parameters for the link layer (check link_layer.h for a description)
+ */
+
+unsigned int csma_symbols_per_sec=CSMA_SYMBOLS_PER_SEC;
+unsigned int csma_bits_per_symbol=CSMA_BITS_PER_SYMBOL;
+unsigned int csma_min_free_samples=CSMA_MIN_FREE_SAMPLES;
+unsigned int csma_max_free_samples=CSMA_MAX_FREE_SAMPLES;
+unsigned int csma_high=CSMA_HIGH;
+unsigned int csma_low=CSMA_LOW;
+unsigned int csma_init_high=CSMA_INIT_HIGH;
+unsigned int csma_init_low=CSMA_INIT_LOW;
+unsigned int csma_rxtx_delay=CSMA_RXTX_DELAY;
+unsigned int csma_exponent_base=CSMA_EXPONENT_BASE;
+unsigned int csma_pramble_length=CSMA_PREAMBLE_LENGTH;
+unsigned int csma_ack_time=CSMA_ACK_TIME;
+double csma_sensitivity=CSMA_SENSITIVITY;
+
+/* GLOBAL VARIABLES - end */
+
+extern unsigned long long ticks_per_sec;
+
+/*
+ * PARSE SIMULATION PARAMETERS FOR THE LINK LAYER
+ */
+
+void parse_link_layer_parameters(void* event_content){
+
+        if(IsParameterPresent(event_content, "csma_symbols_per_sec"))
+                csma_symbols_per_sec=(unsigned int)GetParameterInt(event_content,"csma_symbols_per_sec");
+        if(IsParameterPresent(event_content, "csma_bits_per_symbol"))
+                csma_bits_per_symbol=(unsigned int)GetParameterInt(event_content,"csma_bits_per_symbol");
+        if(IsParameterPresent(event_content, "csma_min_free_samples"))
+                csma_min_free_samples=(unsigned int)GetParameterInt(event_content,"csma_min_free_samples");
+        if(IsParameterPresent(event_content, "csma_max_free_samples"))
+                csma_max_free_samples=(unsigned int)GetParameterInt(event_content,"csma_max_free_samples");
+        if(IsParameterPresent(event_content, "csma_high"))
+                csma_high=(unsigned int)GetParameterInt(event_content,"csma_high");
+        if(IsParameterPresent(event_content, "csma_low"))
+                csma_low=(unsigned int)GetParameterInt(event_content,"csma_low");
+        if(IsParameterPresent(event_content, "csma_init_high"))
+                csma_init_high=(unsigned int)GetParameterInt(event_content,"csma_init_high");
+        if(IsParameterPresent(event_content, "csma_init_low"))
+                csma_init_low=(unsigned int)GetParameterInt(event_content,"csma_init_low");
+        if(IsParameterPresent(event_content, "csma_rxtx_delay"))
+                csma_rxtx_delay=(unsigned int)GetParameterInt(event_content,"csma_rxtx_delay");
+        if(IsParameterPresent(event_content, "csma_exponent_base"))
+                csma_exponent_base=(unsigned int)GetParameterInt(event_content,"csma_exponent_base");
+        if(IsParameterPresent(event_content, "csma_pramble_length"))
+                csma_pramble_length=(unsigned int)GetParameterInt(event_content,"csma_pramble_length");
+        if(IsParameterPresent(event_content, "csma_ack_time"))
+                csma_ack_time=(unsigned int)GetParameterInt(event_content,"csma_ack_time");
+        if(IsParameterPresent(event_content, "csma_sensitivity"))
+                csma_sensitivity=(unsigned int)GetParameterDouble(event_content,"csma_sensitivity");
+}
 
 /*
  * INITIALIZE THE LINK LAYER
@@ -117,15 +174,15 @@ void start_csma(node_state* state){
          */
 
         simtime_t backoff=Random();
-        backoff=fmod(backoff,(double)CSMA_INIT_HIGH-CSMA_INIT_LOW);
-        backoff+=(double)CSMA_INIT_LOW;
+        backoff=fmod(backoff,(double)csma_init_high-csma_init_low);
+        backoff+=(double)csma_init_low;
 
         /*
          * The backoff time is in terms of symbols => multiply it by the number of simulation ticks per symbol, i.e.
          * the number of simulation ticks per second over the number of symbols per second
          */
 
-        backoff*=(TICKS_PER_SEC/CSMA_SYMBOLS_PER_SEC);
+        backoff*=(ticks_per_sec/csma_symbols_per_sec);
 
         /*
          * Set the virtual time when the node will first check whether the channel is free: it has to wait a time equal
@@ -184,7 +241,7 @@ void check_channel(node_state* state){
                  * perceived as free is achieved
                  */
 
-                state->free_channel_count=CSMA_MIN_FREE_SAMPLES;
+                state->free_channel_count=(unsigned char)csma_min_free_samples;
         }
 
         /*
@@ -201,7 +258,7 @@ void check_channel(node_state* state){
                  * RXTX_DELAY(in symbols)*TICKS_PER_SYMBOL
                  */
 
-                simtime_t rxtx_switch_delay=CSMA_RXTX_DELAY*(TICKS_PER_SEC/CSMA_SYMBOLS_PER_SEC);
+                simtime_t rxtx_switch_delay=csma_rxtx_delay*(ticks_per_sec/csma_symbols_per_sec);
 
                 /*
                  * Set the state of the link layer and of the underlying radio to "transmitting"
@@ -218,7 +275,7 @@ void check_channel(node_state* state){
 
                 wait_until(state->me,state->lvt+rxtx_switch_delay,START_FRAME_TRANSMISSION);
         }
-        else if(!CSMA_MAX_FREE_SAMPLES || state->backoff_count<=CSMA_MAX_FREE_SAMPLES){
+        else if(!csma_max_free_samples || state->backoff_count<=csma_max_free_samples){
 
                 /*
                  * The link layer has not collected enough samples of the free channel yet => it backs again off and try
@@ -234,10 +291,10 @@ void check_channel(node_state* state){
                  */
 
                 simtime_t backoff=Random();
-                simtime_t modulo=CSMA_HIGH-CSMA_LOW;
-                modulo*=pow(CSMA_EXPONENT_BASE,state->backoff_count);
+                simtime_t modulo=csma_high-csma_low;
+                modulo*=pow(csma_exponent_base,state->backoff_count);
                 backoff=fmod(backoff,modulo);
-                backoff*=(TICKS_PER_SEC/CSMA_SYMBOLS_PER_SEC);
+                backoff*=(ticks_per_sec/csma_symbols_per_sec);
 
                 /*
                  * Schedule a new event to tell this node to check whether the channel is free after the backoff time
@@ -313,13 +370,13 @@ void start_frame_transmission(node_state* state){
          * Then set the duration of the transmission to the number of symbols in the frame
          */
 
-        simtime_t duration=bits_length/CSMA_BITS_PER_SYMBOL;
+        simtime_t duration=bits_length/csma_bits_per_symbol;
 
         /*
          * Add the length (in symbols) of the preamble added by the physical layer
          */
 
-        duration+=CSMA_PREAMBLE_LENGTH;
+        duration+=csma_pramble_length;
 
         /*
          * In case the node expects an acknowledgment by the recipient for the frame being transmitted, add the number
@@ -328,13 +385,13 @@ void start_frame_transmission(node_state* state){
          */
 
         if(type==CTP_DATA_PACKET)
-                duration+=CSMA_ACK_TIME;
+                duration+=csma_ack_time;
 
         /*
          * Transform the duration from symbols to ticks of the simulation
          */
 
-        duration*=(TICKS_PER_SEC/CSMA_SYMBOLS_PER_SEC);
+        duration*=(ticks_per_sec/csma_symbols_per_sec);
 
         /*
          * Set the duration of the transmission in the link layer frame of the packet
@@ -354,14 +411,7 @@ void start_frame_transmission(node_state* state){
          * reception mode has to be added before the transmission can be regarded as finished
          */
 
-        duration+=CSMA_RXTX_DELAY*(TICKS_PER_SEC/CSMA_SYMBOLS_PER_SEC);
-
-        /*
-         * Clear the "wait_ack" flag in the packet sent
-         * TODO CHECK
-         */
-
-        //state->data_packet.link_frame.wait_ack=false;
+        duration+=csma_rxtx_delay*(ticks_per_sec/csma_symbols_per_sec);
 
         /*
          * Schedule a new event to signal that the transmission is finished and acknowledgment should have been received
@@ -414,7 +464,7 @@ bool send_frame(node_state* state,unsigned int recipient, unsigned char type){
          * Set the number of times the nodes wants to see the channel free before transmitting the packet
          */
 
-        state->free_channel_count=CSMA_MIN_FREE_SAMPLES;
+        state->free_channel_count=(unsigned char)csma_min_free_samples;
 
         /*
          * Set to zero the number of collisions experienced by the node at the beginning
@@ -534,7 +584,7 @@ void frame_received(node_state* state,void* frame, unsigned char type){
                  * The frame contains a data packet => pass it to the ROUTING ENGINE
                  */
 
-                receive_data_packet(frame,state);
+                received_data_packet(frame,state);
 
         }
 }

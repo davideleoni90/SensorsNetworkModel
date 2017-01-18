@@ -7,13 +7,15 @@ typedef struct _ctp_routing_packet ctp_routing_packet;
 typedef struct _node_state node_state;
 typedef double simtime_t;
 
+#ifndef neighbor_table_size
+#define neighbor_table_size 10 // Number of entries in the link estimator table (aka neighbor table)
+#endif
+
 /*
- * CONSTANTS RELATED TO THE LINK ESTIMATOR
+ * PARAMETERS RELATED TO THE LINK ESTIMATOR
  */
 
 enum{
-        NEIGHBOR_TABLE_SIZE=10, // Number of entries in the link estimator table (aka neighbor table)
-
         /*
          * If a node has an 1-hop ETX bigger than this threshold, it is evicted from the estimator table in case a new
          * entry has to added and the table itself is full
@@ -136,9 +138,8 @@ bool send_routing_packet(node_state* state);
 void receive_routing_packet(void* message,node_state* state);
 bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
 int insert_neighbor(unsigned int neighbor,link_estimator_table_entry* link_estimator_table);
-//void get_parent_coordinates(node* parent,link_estimator_table_entry* link_estimator_table);
 void ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
 void init_link_estimator_table(link_estimator_table_entry* link_estimator_table);
-void print_link_estimator_table(node_state* state);
+void parse_link_estimator_parameters(void* event_content);
 
 #endif

@@ -5,14 +5,23 @@
 
 typedef struct _ctp_data_packet ctp_data_packet;
 
+#ifndef forwarding_queue_depth
+#define forwarding_queue_depth 13 // Max number of packets that can be stored in the forwarding queue at the same time
+#endif
+
+#ifndef forwarding_pool_depth
+#define forwarding_pool_depth 13 // Max number of packets that can be stored in the forwarding pool at the same time
+#endif
+
+#ifndef cache_size
+#define cache_size 4 // Max number of packets that can be stored in the output cache at the same timee
+#endif
+
 /*
- * CONSTANTS RELATED TO FORWARDING
+ * PARAMETERS RELATED TO FORWARDING ENGINE
  */
 
 enum{
-        FORWARDING_QUEUE_DEPTH=13, // Max number of packets that can be stored in the forwarding queue at the same time
-        FORWARDING_POOL_DEPTH=13, // Max number of packets that can be stored in the forwarding pool at the same time
-        CACHE_SIZE=4, // Max number of packets that can be stored in the output cache at the same time
         MAX_RETRIES=30, // Max number of times the forwarding engine will try to transmit a packet before giving up
 
         /*
@@ -31,13 +40,6 @@ enum{
 
         NO_ROUTE_OFFSET=10,
 
-        /*
-         * Interval of time after which the node tries to resend a data packet after a routing loop has been detected
-         * and (hopefully) fixed
-         */
-
-        LOOP_DETECTED_OFFSET=2,
-
         SEND_PACKET_TIMER=10, // Period of the timer that triggers the sending of a new data packet (in seconds)
         MIN_PAYLOAD=10, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
@@ -47,12 +49,11 @@ enum{
 
 void create_data_packet(node_state* state);
 void start_forwarding_engine(node_state* state);
-void receive_ack(bool is_packet_acknowledged,node_state* state);
-void receive_data_packet(void* message,node_state* state,simtime_t time);
 bool send_data_packet(node_state* state);
 void forward_data_packet(ctp_data_packet* packet,node_state* state);
-bool is_congested(node_state* state);
 void transmitted_data_packet(node_state* state,bool result);
-void is_ack_received(node_state* state,ctp_data_packet* packet);
+void received_data_packet(void* message,node_state* state);
+bool is_congested(node_state* state);
+void parse_forwarding_engine_parameters(void* event_content);
 
 #endif

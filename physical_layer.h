@@ -1,11 +1,11 @@
-#ifndef SENSORSNETWORKMODELPROJECT_WIRELESS_LINKS_H
-#define SENSORSNETWORKMODELPROJECT_WIRELESS_LINKS_H
+#ifndef SENSORSNETWORKMODELPROJECT_PHYSICAL_LAYER_H
+#define SENSORSNETWORKMODELPROJECT_PHYSICAL_LAYER_H
 
 #include <stdbool.h>
 #include "application.h"
 
 /*
- * WIRELESS LINKS CONSTANTS
+ * PHYSICAL LAYER PARAMETERS' DEFAULT VALUES
  */
 
 enum{
@@ -21,13 +21,13 @@ enum{
 };
 
 void init_physical_layer(node_state* state);
-pending_transmission* add_pending_transmission(node_state* state, unsigned char type,void* frame, double power,
-                                               pending_transmission* last);
-void add_gain_entry(unsigned int source, unsigned int sink, double gain, double length);
+void parse_physical_layer_parameters(void* event_content);
+pending_transmission* add_pending_transmission(unsigned char type,void* frame, double power,pending_transmission* last);
+void add_gain_entry(unsigned int source, unsigned int sink, double gain);
 void add_noise_entry(unsigned int node, double noise_floor, double white_noise);
 unsigned int get_nodes();
 double compute_signal_strength(node_state* state);
 bool is_channel_free(node_state* state);
 void transmit_frame(node_state* state,unsigned char type);
 void transmission_finished(node_state* state,pending_transmission* finished_transmission);
-#endif //SENSORSNETWORKMODELPROJECT_WIRELESS_LINKS_H
+#endif //SENSORSNETWORKMODELPROJECT_PHYSICAL_LAYER_H

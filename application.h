@@ -7,6 +7,7 @@
 #include <ROOT-Sim.h>
 #include <bits/mathdef.h>
 
+
 /*
  * EVENT TYPES
  *
@@ -24,14 +25,14 @@ enum{
         SEND_PACKET_TIMER_FIRED=3, // The timer for data packets has been fired  => send a data packet
         UPDATE_ROUTE_TIMER_FIRED=4, // The timer for updating the route has been fired
         SET_BEACONS_TIMER=5, // The interval of the timer for beacons has to be updated
-        RETRANSMITT_DATA_PACKET=9, // Try to re-send a data packet whose first sending attempt failed
-        ACK_RECEIVED=11, // The ack for the last data packet sent has just been received
-        CHECK_CHANNEL_FREE=12, // The link layer has to check whether the channel is free
-        START_FRAME_TRANSMISSION=13, // The link layer starts to transmit a frame over the channel
-        FRAME_TRANSMITTED=14, // The frame has been transmitted
-        BEACON_TRANSMISSION_STARTED=15, // The transmission of a new frame containing a beacon has started
-        DATA_PACKET_TRANSMISSION_STARTED=16, // The transmission of a new frame containing a beacon has started
-        TRANSMISSION_FINISHED=17, // The transmission of a new frame has finished
+        RETRANSMITT_DATA_PACKET=6, // Try to re-send a data packet whose first sending attempt failed
+        ACK_RECEIVED=7, // The ack for the last data packet sent has just been received
+        CHECK_CHANNEL_FREE=8, // The link layer has to check whether the channel is free
+        START_FRAME_TRANSMISSION=9, // The link layer starts to transmit a frame over the channel
+        FRAME_TRANSMITTED=10, // The frame has been transmitted
+        BEACON_TRANSMISSION_STARTED=11, // The transmission of a new frame containing a beacon has started
+        DATA_PACKET_TRANSMISSION_STARTED=12, // The transmission of a new frame containing a beacon has started
+        TRANSMISSION_FINISHED=13, // The transmission of a new frame has finished
 };
 
 /*
@@ -53,7 +54,6 @@ enum {
 
 enum{
         SENDING=0x1, // Busy sending a data packet => wait before send another packet
-        ACK_PENDING=0x2, // Waiting for the last sent data packet to be acknowledged
         RUNNING=0x4 // The node is running => has not failed (yet)
 };
 
@@ -202,8 +202,7 @@ typedef struct _routing_table_entry{
 typedef struct _gain_entry{
         double gain; // Gain associated to the link
         unsigned int sink; // ID of the sink node of the link
-        double distance; // The length of the link, i.e. the euclidean distance between its vertices
-        struct gain_entry* next; // Pointer to the next entry in the list of gains
+        struct _gain_entry* next; // Pointer to the next entry in the list of gains
 }gain_entry;
 
 /*
@@ -229,13 +228,11 @@ typedef struct _noise_entry{
  */
 
 typedef struct _pending_transmission{
-        //simtime_t start_time; // Value of the virtual time when the transmission was initiated by the sender
-        //simtime_t end_time; // Value of the virtual time when the transmission is expected to finish
         void* frame; // Pointer to the frame carried by the signal
         unsigned char frame_type; // The type of the frame, either CTP_BEACON or CTO_DATA_PACKET
         double power; // The strength of the transmission
         bool lost; // Boolean value set to true in case a stronger transmission comes and hides the current one
-        struct pending_transmission* next; // Pointer to the next element in the list of pending transmissions
+        struct _pending_transmission* next; // Pointer to the next element in the list of pending transmissions
 }pending_transmission;
 
 /*
@@ -318,7 +315,7 @@ typedef struct _node_state{
          * to a neighbor node
          */
 
-        link_estimator_table_entry link_estimator_table[NEIGHBOR_TABLE_SIZE];
+        link_estimator_table_entry link_estimator_table[neighbor_table_size];
 
         /*
          * BEACON SEQUENCE NUMBER
@@ -370,7 +367,7 @@ typedef struct _node_state{
          * value as parent
          */
 
-        routing_table_entry routing_table[ROUTING_TABLE_SIZE];
+        routing_table_entry routing_table[routing_table_size];
         unsigned char neighbors; // Number of active entries in the routing table
 
         /* ROUTING ENGINE FIELDS - end */
@@ -396,7 +393,7 @@ typedef struct _node_state{
          * 2-forwarding_pool_index
          */
 
-        forwarding_queue_entry forwarding_pool[FORWARDING_POOL_DEPTH];
+        forwarding_queue_entry forwarding_pool[forwarding_pool_depth];
         unsigned char forwarding_pool_count; // Number of elements in the pool
         unsigned char forwarding_pool_index; // Index of the array where the next entry put will be collocated
 
@@ -426,7 +423,7 @@ typedef struct _node_state{
          * it is then dequeued
          */
 
-        forwarding_queue_entry* forwarding_queue[FORWARDING_QUEUE_DEPTH];
+        forwarding_queue_entry* forwarding_queue[forwarding_queue_depth];
 
         unsigned char forwarding_queue_count; // The counter of the elements in the forwarding queue
         unsigned char forwarding_queue_head; // The index of the first element in the queue (least recently added)
@@ -460,7 +457,7 @@ typedef struct _node_state{
          * least recently used is removed
          */
 
-        ctp_data_packet output_cache[CACHE_SIZE];
+        ctp_data_packet output_cache[cache_size];
 
         unsigned char output_cache_count; // Number of sent data packets cached
         unsigned char output_cache_first; // Index of the entry in the cache that was least recently added
@@ -499,6 +496,8 @@ typedef struct _node_state{
         /* STATISTICS - start */
 
         unsigned long parent_changes; // Number of times the node has changes its parent
+        unsigned long routing_loops; // Number of times the node detects the risk of a routing loop
+        unsigned long duplicates; // Number of duplicates detected by the node
 
         /* STATISTICS - end */
 

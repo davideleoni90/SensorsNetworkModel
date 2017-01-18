@@ -22,6 +22,40 @@
 #include "application.h"
 #include "link_layer.h"
 
+/* GLOBAL VARIABLES - start
+ *
+ * Default values of the parameters for the link estimator (check link_estimator.h for a description)
+ */
+
+unsigned int evict_worst_etx_threshold=EVICT_WORST_ETX_THRESHOLD;
+unsigned int evict_best_etx_threshold=EVICT_BEST_ETX_THRESHOLD;
+unsigned int max_pkt_gap=MAX_PKT_GAP;
+unsigned short alpha=ALPHA;
+unsigned int dlq_pkt_window=DLQ_PKT_WINDOW;
+unsigned int blq_pkt_window=BLQ_PKT_WINDOW;
+
+/* GLOBAL VARIABLES - end */
+
+/*
+ * PARSE SIMULATION PARAMETERS FOR THE LINK ESTIMATOR
+ */
+
+void parse_link_estimator_parameters(void* event_content){
+
+        if(IsParameterPresent(event_content, "evict_worst_etx_threshold"))
+                evict_worst_etx_threshold=(unsigned int)GetParameterInt(event_content,"evict_worst_etx_threshold");
+        if(IsParameterPresent(event_content, "evict_best_etx_threshold"))
+                evict_best_etx_threshold=(unsigned int)GetParameterInt(event_content,"evict_best_etx_threshold");
+        if(IsParameterPresent(event_content, "max_pkt_gap"))
+                max_pkt_gap=(unsigned int)GetParameterInt(event_content,"max_pkt_gap");
+        if(IsParameterPresent(event_content, "alpha"))
+                alpha=(unsigned short)GetParameterInt(event_content,"alpha");
+        if(IsParameterPresent(event_content, "dlq_pkt_window"))
+                dlq_pkt_window=(unsigned short)GetParameterInt(event_content,"dlq_pkt_window");
+        if(IsParameterPresent(event_content, "blq_pkt_window"))
+                blq_pkt_window=(unsigned short)GetParameterInt(event_content,"blq_pkt_window");
+}
+
 /*
  * LINK ESTIMATOR TABLE OPERATIONS - start
  */
@@ -99,7 +133,7 @@ unsigned char find_estimator_entry(unsigned int neighbor,link_estimator_table_en
          * provided ID is found
          */
 
-        for(index=0;index<NEIGHBOR_TABLE_SIZE;index++){
+        for(index=0;index<neighbor_table_size;index++){
 
                 /*
                  * Only check entries with VALID flag set
@@ -185,7 +219,7 @@ unsigned char find_estimator_worst_entry(unsigned char etx_threshold,link_estima
          * Scan the estimator table looking for the entry with the highest ETX beyond the given threshold
          */
 
-        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
+        for(i=0;i<neighbor_table_size;i++){
 
                 /*
                  * Check whether the current entry is VALID: if not, jump to the next
@@ -212,7 +246,7 @@ unsigned char find_estimator_worst_entry(unsigned char etx_threshold,link_estima
                  * The current is VALID, MATURE and NOT PINNED => check the value of its ETX
                  */
 
-                current_etx=link_estimator_table[i].one_hop_etx;
+                current_etx=(unsigned char)link_estimator_table[i].one_hop_etx;
 
                 /*
                  * If the ETX of the current entry is bigger than the ETX found so far, keep track of its index and
@@ -272,7 +306,7 @@ unsigned char find_random_entry(link_estimator_table_entry* link_estimator_table
          * Scan the estimator table to count the number of candidates
          */
 
-        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
+        for(i=0;i<neighbor_table_size;i++){
 
                 /*
                  * The entry is a candidate if it's VALID
@@ -318,7 +352,7 @@ unsigned char find_random_entry(link_estimator_table_entry* link_estimator_table
          * The entry selected is the "counter-th" entry which is VALID AND NOT PINNED NOR MATURE
          */
 
-        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
+        for(i=0;i<neighbor_table_size;i++){
 
                 /*
                  * Discard invalid entries
@@ -371,7 +405,7 @@ unsigned char find_estimator_free_entry(link_estimator_table_entry* link_estimat
          * Look for all the entries of the neighbor table and stop when one is not valid
          */
 
-        for(index=0;index<NEIGHBOR_TABLE_SIZE;index++){
+        for(index=0;index<neighbor_table_size;index++){
 
                 /*
                  * Skip valid entries
@@ -428,7 +462,7 @@ void init_link_estimator_table(link_estimator_table_entry* link_estimator_table)
          * Set all the entries
          */
 
-        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
+        for(i=0;i<neighbor_table_size;i++){
                 link_estimator_table[i].flags=0;
                 link_estimator_table[i].neighbor=UINT_MAX-1;
         }
@@ -495,7 +529,7 @@ int insert_neighbor(unsigned int neighbor,link_estimator_table_entry* link_estim
                          * => look for the one with 1-hop ETX greater than EVICT_BEST_ETX_THRESHOLD
                          */
 
-                        index=find_estimator_worst_entry(EVICT_BEST_ETX_THRESHOLD,link_estimator_table);
+                        index=find_estimator_worst_entry((unsigned char)evict_best_etx_threshold,link_estimator_table);
 
                         /*
                          * Check if a victim node has been found
@@ -884,7 +918,7 @@ unsigned short compute_ETX(unsigned char new_quality){
  */
 
 void update_ETX(link_estimator_table_entry* entry,unsigned short new_quality){
-        entry->one_hop_etx=(ALPHA * entry->one_hop_etx + (10 - ALPHA) * new_quality)/10;
+        entry->one_hop_etx=(alpha * entry->one_hop_etx + (10 - alpha) * new_quality)/10;
 }
 
 /*
@@ -985,7 +1019,7 @@ void update_ingoing_quality(unsigned int neighbor,link_estimator_table_entry* li
          * Scan the estimator table looking for the entry corresponding to the ID of the neighbor
          */
 
-        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
+        for(i=0;i<neighbor_table_size;i++){
 
                 /*
                  * Get the current entry
@@ -1146,7 +1180,7 @@ void update_neighbor_entry(unsigned char index, unsigned char seq,link_estimator
          * If the number of lost beacons is bigger than MAX_PKT_GAP, the entry has to be re-initialized
          */
 
-        if(lost_beacons>MAX_PKT_GAP){
+        if(lost_beacons>max_pkt_gap){
 
                 /*
                  * Reinitialize entry
@@ -1169,8 +1203,8 @@ void update_neighbor_entry(unsigned char index, unsigned char seq,link_estimator
                  * beacons is bigger than or equal to BLQ_PKT_WINDOW, the ETX of the neighbor has to be recomputed
                  */
 
-                if((link_estimator_table[index].beacons_missed+link_estimator_table[index].beacons_received>=BLQ_PKT_WINDOW)
-                   || (lost_beacons>=BLQ_PKT_WINDOW)) {
+                if((link_estimator_table[index].beacons_missed+link_estimator_table[index].beacons_received>=blq_pkt_window)
+                   || (lost_beacons>=blq_pkt_window)) {
                         update_ingoing_quality(link_estimator_table[index].neighbor, link_estimator_table);
                 }
         }
@@ -1287,7 +1321,7 @@ void process_received_beacon(link_layer_frame* link_frame,ctp_link_estimator_fra
                                  * forward data to the root of the collection tree => find such an entry
                                  */
 
-                                index=find_estimator_worst_entry(EVICT_WORST_ETX_THRESHOLD,link_estimator_table);
+                                index=find_estimator_worst_entry(evict_worst_etx_threshold,link_estimator_table);
 
                                 /*
                                  * Check whether an entry to be evicted has been found
@@ -1461,7 +1495,7 @@ void ack_received(unsigned int recipient,bool ack_received,link_estimator_table_
                  * update of the outgoing link quality
                  */
 
-                if(entry->data_sent>=DLQ_PKT_WINDOW)
+                if(entry->data_sent>=dlq_pkt_window)
 
                         /*
                          * The time has come to update the outgoing link quality of the link between the current node

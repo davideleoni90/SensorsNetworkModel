@@ -91,4 +91,5 @@ void frame_transmitted(node_state* state);
 void frame_received(node_state* state,void* frame, unsigned char type);
 void check_channel(node_state* state);
 void init_link_layer(node_state* state);
+void parse_link_layer_parameters(void* event_content);
 #endif //SENSORSNETWORKMODELPROJECT_LINK_LAYER_H

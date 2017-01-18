@@ -9,14 +9,17 @@ typedef struct _ctp_routing_frame ctp_routing_frame;
 typedef struct _node_state node_state;
 typedef struct _route_info route_info;
 
+#ifndef routing_table_size
+#define routing_table_size 10 // Number of entries in the routing table
+#endif
+
 /*
- * CONSTANTS RELATED TO ROUTING
+ * PARAMETERS RELATED TO THE ROUTING ENGINE
  */
 
 enum{
         UPDATE_ROUTE_TIMER=8000, // After such interval of time, the route of the node is (re)computed (in ms)
         INVALID_ADDRESS=0xFFFF, // Value used for the ID of neighbor that is not valid
-        ROUTING_TABLE_SIZE=10, // Max number of entries in the routing table
 
         /*
          * Neighbors whose links have a 1-hop ETX bigger than or equal to this threshold can't be selected as parent
@@ -57,5 +60,6 @@ void send_beacon(node_state* state);
 void schedule_beacons_interval_update(node_state* state);
 void double_beacons_send_interval(node_state* state);
 bool is_neighbor_worth_inserting(ctp_routing_frame* routing_frame,node_state* state);
+void parse_routing_engine_parameters(void* event_content);
 
 #endif
