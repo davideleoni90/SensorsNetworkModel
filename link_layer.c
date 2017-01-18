@@ -262,7 +262,7 @@ void check_channel(node_state* state){
                 if(state->link_layer_outgoing_type==CTP_BEACON){
 
                         /*
-                         * The packet is a beacon => inform the ROUTING ENGINE
+                         * The packet is a beacon => inform the ROUTING ENGINE: simply clear its sending guard variable
                          */
 
                         state->sending_beacon=false;
@@ -270,10 +270,10 @@ void check_channel(node_state* state){
                 else{
 
                         /*
-                         * The packet is a data packet => inform the FORWARDING ENGINE
+                         * The packet is a data packet => inform the FORWARDING ENGINE about the failure
                          */
 
-                        state->sending_data_packet=false;
+                        transmitted_data_packet(state,false);
                 }
         }
 
@@ -427,6 +427,13 @@ bool send_frame(node_state* state,unsigned int recipient, unsigned char type){
          */
 
         start_csma(state);
+
+        /*
+         * The packet passed by above layers has been accepted by the link layer and will now be sent inside a link
+         * layer frame => return true
+         */
+
+        return true;
 }
 
 /*
@@ -479,11 +486,10 @@ void frame_transmitted(node_state* state){
         else{
 
                 /*
-                 * Clear the flag indicating the transmission of a data packet
-                 * TODO check if ack received
+                 * Inform the FORWARDING ENGINE that the packet has been successfully sent
                  */
 
-                state->sending_data_packet=false;
+                transmitted_data_packet(state,true);
         }
 }
 

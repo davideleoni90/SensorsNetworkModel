@@ -1400,7 +1400,7 @@ void receive_routing_packet(void* message,node_state* state){
 }
 
 /*
- * CHECK IF ACKNOWLEDGMENT RECEIVED
+ * ACKNOWLEDGMENT RECEIVED
  *
  * Function called by the FORWARDING ENGINE to signal that the intended recipient of a data packet sent or did not send
  * the corresponding acknowledgment => as a consequence, the outgoing link quality between the current node and the
@@ -1411,7 +1411,7 @@ void receive_routing_packet(void* message,node_state* state){
  * @link_estimator_table: pointer to the link estimator table of the node
  */
 
-void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table){
+void ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table){
 
         /*
          * Pointer to the entry of the table corresponding to the given recipient

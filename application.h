@@ -24,11 +24,7 @@ enum{
         SEND_PACKET_TIMER_FIRED=3, // The timer for data packets has been fired  => send a data packet
         UPDATE_ROUTE_TIMER_FIRED=4, // The timer for updating the route has been fired
         SET_BEACONS_TIMER=5, // The interval of the timer for beacons has to be updated
-        DATA_PACKET_DELIVERED=6, // The node has been delivered a data packet => check if it can be received
-        RECEIVE_BEACON=7, // The node has been delivered a beacon reception event=> check if it can be received
-        RECEIVE_DATA_PACKET=8, // The node has been delivered a data packet reception event=> check if it can be received
         RETRANSMITT_DATA_PACKET=9, // Try to re-send a data packet whose first sending attempt failed
-        CHECK_ACK_RECEIVED=10, // Check whether the last data packet sent has been acknowledged or not
         ACK_RECEIVED=11, // The ack for the last data packet sent has just been received
         CHECK_CHANNEL_FREE=12, // The link layer has to check whether the channel is free
         START_FRAME_TRANSMISSION=13, // The link layer starts to transmit a frame over the channel
@@ -479,6 +475,14 @@ typedef struct _node_state{
          */
 
         ctp_data_packet data_packet;
+
+        /*
+         * The node only creates one data packet at a time => it is necessary to use the following guard variable to
+         * avoid that the data packet is modified before it has been put into the output queue
+         */
+
+        bool sending_data_packet;
+        ctp_data_packet* last_packet_acked; // When a packet is acked, this variable points to the packet
 
         /*
          * LOCAL FORWARDING QUEUE ENTRY

@@ -28,6 +28,7 @@
 
 #include <limits.h>
 #include "application.h"
+#include "link_layer.h"
 
 
 /* FORWARD DECLARATIONS */
@@ -511,6 +512,30 @@ void cache_remove(unsigned char offset,node_state* state){
 /* OUTPUT CACHE - end */
 
 /*
+ * SCHEDULE NEW SENDING
+ *
+ * Set the retransmission timer to a value calculated with some randomness and schedule a new sending phase when the
+ * timer is fired. The value of the timer is randomly selected in the range [delta,interval-1+delta]
+ *
+ * @state: pointer to the object representing the current state of the node
+ * @interval: value of the desired interval
+ * @delta: value of the desired delta
+ */
+
+void schedule_retransmission(node_state* state){
+
+        /*
+         * Schedule the new sending after an interval of time whose length is randomly selected in the range
+         * [delta,interval+delta]
+         */
+
+        unsigned int interval=(((unsigned int) Random())%DATA_PACKET_RETRANSMISSION_OFFSET)+
+                DATA_PACKET_RETRANSMISSION_DELTA;
+
+        wait_until(state->me,state->lvt+(TICKS_PER_SEC/(interval*1000)),RETRANSMITT_DATA_PACKET);
+}
+
+/*
  * START FORWARDING ENGINE
  *
  * This function is in charge of initializing the variables of the forwarding engine and to start a periodic timer that
@@ -544,6 +569,18 @@ void start_forwarding_engine(node_state* state){
         state->data_packet_seqNo=0;
 
         /*
+         * Set the guard variable, that protects the data packet from concurrent writing, to false
+         */
+
+        state->sending_data_packet=false;
+
+        /*
+         * Set the pointer to the last data packet acke to NULL
+         */
+
+        state->last_packet_acked=NULL;
+
+        /*
          * Check if it's the root node: if not, schedule the sending of a data packet
          */
 
@@ -555,7 +592,7 @@ void start_forwarding_engine(node_state* state){
                  * The simulator is in charge of re-setting the timer every time it is fired
                  */
 
-                wait_until(state->me,state->lvt+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
+                wait_until(state->me,state->lvt+(TICKS_PER_SEC/SEND_PACKET_TIMER),SEND_PACKET_TIMER_FIRED);
 }
 
 /*
@@ -593,11 +630,18 @@ bool send_data_packet(node_state* state) {
         forwarding_queue_entry* first_entry;
 
         /*
-         * ID and coordinates of the recipient of the data packet, namely the the current parent => the forwarding
-         * engine asks the routing engine about the identity of the current parent node
+         * ID of the recipient of the data packet, namely the the current parent => the forwarding engine asks the
+         * routing engine about the identity of the current parent node
          */
 
-        node parent;
+        unsigned int parent;
+
+        /*
+         * Boolen variable telling whether the data packet has been successfully submitted to the underlying LINK
+         * LAYER
+         */
+
+        bool submitted;
 
         /*
          * Check if there at least one packet to forward; when the output queue is empty, its "counter" is set to 0
@@ -613,7 +657,15 @@ bool send_data_packet(node_state* state) {
         }
 
         /*
-         * The output queue is not empty.
+         * Check if the node has already submitted another data packet to the link layer: if so, it has to wait
+         * before submitting a new packet
+         */
+
+        if(state->state&SENDING)
+                return false;
+
+        /*
+         * The output queue is not empty and the node is not sending another packet.
          * Check if the node has a valid route => ask the routing engine the ETX corresponding to the current route of
          * the node
          */
@@ -626,7 +678,7 @@ bool send_data_packet(node_state* state) {
                  * time equal to NO_ROUTE_RETRY; during this time, hopefully the node has fixed its route.
                  */
 
-                wait_until(state->me.ID,state->lvt+NO_ROUTE_OFFSET,SEND_PACKET_TIMER_FIRED);
+                wait_until(state->me,state->lvt+(TICKS_PER_SEC/NO_ROUTE_OFFSET),RETRANSMITT_DATA_PACKET);
 
                 /*
                  * Return false, since an immediate further invocation will be of no help: it is necessary to wait at
@@ -635,13 +687,6 @@ bool send_data_packet(node_state* state) {
 
                 return false;
         }
-
-        /*
-         * Check whether the node is waiting for the acknowledgment of the last data packet sent: if so, hold on
-         */
-
-        if(state->state&ACK_PENDING)
-                return false;
 
         /*
          * The node has a valid route (parent) => before sending the head packet, check that it's not duplicated.
@@ -706,31 +751,24 @@ bool send_data_packet(node_state* state) {
         parent=get_parent(state);
 
         /*
-         * Check if the parent is valid, i.e. its coordinates are not set to INT_MAX
-         */
-
-        if(parent.coordinates.x==INT_MAX)
-                printf("wrong parent for node %d\n",state->me.ID);
-
-        /*
          * Set the "src" and "dst" fields of the physical overhead of the packet
          */
 
-        first_entry->packet.phy_mac_overhead.src=state->me;
-        first_entry->packet.phy_mac_overhead.dst=parent;
+        first_entry->packet.link_frame.src=state->me;
+        first_entry->packet.link_frame.sink=parent;
 
         /*
-         * Forward the data packet to the specified destination => schedule a new unicast event whose recipient is the
-         * parent node reported in the physical layer frame of the packet
+         * Forward the data packet to the specified destination => call the dedicated function from the link layer
          */
 
-        unicast_message(&first_entry->packet,state->lvt,state->me.ID);
+        submitted=send_frame(state,parent,CTP_DATA_PACKET);
 
         /*
-         * The node is now waiting for the last data packet sent to be acknowledged => set the corresponding flag
+         * If the packet has been successfully sumbitted, set the flag SENDING
          */
 
-        state->state|=ACK_PENDING;
+        if(submitted)
+                state->state|=SENDING;
 
         /*
          * The data packet has been sent => no need to re-execute this function
@@ -764,10 +802,11 @@ void create_data_packet(node_state* state){
         ctp_data_packet_frame *data_frame;
 
         /*
-         * Check if the last data packet created has already been acknowledged: if not, wait before creating a new one
+         * Check if the last data packet created by the node has already been enqueued: if not, wait before creating a
+         * new one, otherwise the former would be overwritten
          */
 
-        if(!(state->state&SENDING)) {
+        if(!state->sending_data_packet) {
 
                 /*
                  * Set the payload of the data packet to be sent
@@ -786,7 +825,7 @@ void create_data_packet(node_state* state){
                  * Start with origin, which has to be set to the ID of the current node
                  */
 
-                data_frame->origin = state->me.ID;
+                data_frame->origin = state->me;
 
                 /*
                  * Then set the sequence number
@@ -854,36 +893,35 @@ void create_data_packet(node_state* state){
                         forwarding_queue_enqueue(&state->local_entry, state);
 
                         /*
-                         * Set the state of the node to SENDING, because the packet it created is now in the forwarding
-                         * queue
+                         * Set the guard variable to true, because the packet created is now in the forwarding queue
                          */
 
-                        state->state |= SENDING;
+                        state->sending_data_packet=true;
 
                         /*
-                         * Now that the packet has been successfully queued up, it's time to send the data packet. Call
-                         * the function the first time
+                         * Now check the state of the node: if another data packet has already been submitted to the
+                         * data link layer, it's necessary to wait, otherwise extract the packet from the head of the
+                         * output queue and send it to the parent node
                          */
 
-                        try_again = send_data_packet(state);
+                        if(!(state->state&SENDING)){
 
-                        /*
-                         * If "try_again" is "true", it means that a new sending attempt is necessary => keep trying until a
-                         * valid (not duplicate) packet is found in the output queue or this is empty (in either case,"try_again"
-                         * is set to "false" and the loop ends)
-                         */
+                                /*
+                                 * A new data packet can be sent => call the sending function the first time
+                                 */
 
-                        while (try_again)
                                 try_again = send_data_packet(state);
-                }
-        }
-        else{
-                /*
-                 * The last packet created by this node has not been acknowledged yet => try to speed up the sending
-                 * of the packets in the forwarding queue
-                 */
 
-                send_data_packet(state);
+                                /*
+                                 * If "try_again" is "true", it means that a new sending attempt is necessary => keep
+                                 * trying until a valid (not duplicate) packet is found in the output queue or this is
+                                 * empty (in either case,"try_again" is set to "false" and the loop ends)
+                                 */
+
+                                while (try_again)
+                                        try_again = send_data_packet(state);
+                        }
+                }
         }
 }
 
@@ -1125,6 +1163,88 @@ void forward_data_packet(ctp_data_packet* packet,node_state* state){
                 forwarding_pool_put(entry,state);
         }
 }
+
+/*
+ * TRANSMITTED DATA PACKET
+ *
+ * This is a callback function invoked by the LINK LAYER to tell the FORWARDING ENGINE whether the last data packet
+ * submitted has been successfully transmitted to the recipient or not
+ *
+ * @state: pointer to the object representing the current state of the node
+ * @result: boolean value set to true if the packet has been successfully transmitted, false otherwise
+ */
+
+void transmitted_data_packet(node_state* state,bool result){
+
+        /*
+         * If the packet has not been transmitted, schedule a new sending phase
+         */
+
+        if(!result) {
+
+                /*
+                 * Schedule the new sending phase adding some randomness
+                 */
+
+                schedule_retransmission(state);
+        }
+        else{
+
+                /*
+                 * Get a pointer to the head entry of the output queue and to the  corresponding packet
+                 */
+
+                forwarding_queue_entry* head_entry=state->forwarding_queue[state->forwarding_queue_head];
+                ctp_data_packet* head=&head_entry->packet;
+
+                /*
+                 * The packet has been successfully transmitted => check if it has been acked, i.e if the packet at
+                 * the head of the output queue is the last acknowledged
+                 */
+
+                if(head==state->last_packet_acked){
+
+                        /*
+                         * The packet has been acknowledged => remove the message from the output queue, so that next
+                         * transmission phase will send the next packet in the output queue
+                         */
+
+                        forwarding_queue_dequeue(state);
+
+                        /*
+                         * Remove the SENDING FLAG
+                         */
+
+                        state->state&=~SENDING;
+
+                        /*
+                         * Inform the LINK ESTIMATOR about the fact that the recipient acknowledged the data packet,
+                         * since this piece of information is used by the LINK ESTIMATOR to re-calculate the outgoing
+                         * link quality between the current node and the recipient => extract the ID of the latter from
+                         * the last data packet sent
+                         */
+
+                        ack_received(head->link_frame.sink,true,state->link_estimator_table);
+
+                        /*
+                         * If the last packet sent was a forwarded one, insert in the output cache in order to avoid
+                         * duplicates
+                         */
+
+                        if(!head_entry->is_local) {
+                                cache_enqueue(&head_entry->packet.data_packet_frame, state);
+
+                                /*
+                                 * Return the entry of the last sent data packet to the forwarding pool
+                                 */
+
+                                forwarding_pool_put(head_entry,state);
+                }
+
+        }
+}
+
+
 
 /*
  * IS ACK RECEIVED?

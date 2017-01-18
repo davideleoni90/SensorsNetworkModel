@@ -137,7 +137,7 @@ void receive_routing_packet(void* message,node_state* state);
 bool pin_neighbor(unsigned int address,link_estimator_table_entry* link_estimator_table);
 int insert_neighbor(unsigned int neighbor,link_estimator_table_entry* link_estimator_table);
 //void get_parent_coordinates(node* parent,link_estimator_table_entry* link_estimator_table);
-void check_if_ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
+void ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
 void init_link_estimator_table(link_estimator_table_entry* link_estimator_table);
 void print_link_estimator_table(node_state* state);
 

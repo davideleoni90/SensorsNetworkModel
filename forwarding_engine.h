@@ -16,24 +16,20 @@ enum{
         MAX_RETRIES=30, // Max number of times the forwarding engine will try to transmit a packet before giving up
 
         /*
-         * When a data packet is sent, after the following time interval an event of time CHECK_ACK_RECEIVED  is
-         * delivered to the sender => at this point it checks whether the packet has been already acknowledged by the
-         * recipient or not and reacts properly.
+         * Interval of time after which the node tries to resend a data packet that has not been successfully sent or
+         * acknowledged (in ms)
          */
 
-        ACK_TIMEOUT_OFFSET=2,
+        DATA_PACKET_RETRANSMISSION_OFFSET=22,
+        DATA_PACKET_RETRANSMISSION_DELTA=7, // Delta applied to calculate the random interval before a retransmission
 
-        /*
-         * Interval of time after which the node tries to resend a data packet that has not been acknowledged
-         */
-
-        DATA_PACKET_RETRANSMISSION_OFFSET=2,
 
         /*
          * Interval of time after which the node tries to resend a data packet in case it has not chosen a parent yet
+         * (in seconds)
          */
 
-        NO_ROUTE_OFFSET=4,
+        NO_ROUTE_OFFSET=10,
 
         /*
          * Interval of time after which the node tries to resend a data packet after a routing loop has been detected
@@ -42,11 +38,7 @@ enum{
 
         LOOP_DETECTED_OFFSET=2,
 
-        /*
-         * Period of the timer that triggers the sending of a new data packet
-         */
-
-        SEND_PACKET_TIMER=10,
+        SEND_PACKET_TIMER=10, // Period of the timer that triggers the sending of a new data packet (in seconds)
         MIN_PAYLOAD=10, // Lower bound for the range of the data gathered by the node
         MAX_PAYLOAD=100 // Upper bound for the range of the data gathered by the node
 };
@@ -60,6 +52,7 @@ void receive_data_packet(void* message,node_state* state,simtime_t time);
 bool send_data_packet(node_state* state);
 void forward_data_packet(ctp_data_packet* packet,node_state* state);
 bool is_congested(node_state* state);
+void transmitted_data_packet(node_state* state,bool result);
 void is_ack_received(node_state* state,ctp_data_packet* packet);
 
 #endif

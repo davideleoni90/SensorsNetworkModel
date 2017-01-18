@@ -662,13 +662,13 @@ void transmit_frame(node_state* state,unsigned char type){
 
         /*
          * Get the pointer to the frame to be sent: either the beacon of the node or the packet in the head of the
-         * output queue; also get the recipient od the packet
+         * output queue
          */
 
         if(type==CTP_BEACON)
                 state->radio_outgoing = &state->routing_packet;
         else {
-                state->radio_outgoing = &state->data_packet;
+                state->radio_outgoing = &state->forwarding_queue[state->forwarding_queue_head]->packet;
         }
 
         /*

@@ -469,11 +469,11 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         if(state->state&RUNNING) {
 
                                 /*
-                                 * If the node is waiting for a packet to be acknowledged, keep waiting, otherwise create a new
-                                 * packet and send it to the root node
+                                 * If the node is busy sending a packet keep waiting, otherwise create a new packet and
+                                 * send it to the root node
                                  */
 
-                                if (!(state->state & ACK_PENDING)) {
+                                if (!(state->state & SENDING)) {
                                         create_data_packet(state);
                                 }
 
@@ -482,7 +482,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * of time, starting from now
                                  */
 
-                                wait_until(me, now + SEND_PACKET_TIMER, SEND_PACKET_TIMER_FIRED);
+                                wait_until(me, now + (TICKS_PER_SEC/SEND_PACKET_TIMER), SEND_PACKET_TIMER_FIRED);
                         }
                         break;
 
@@ -495,10 +495,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         if(state->state&RUNNING) {
 
                                 /*
-                                 * This event is delivered to the node in order for it to transmit again the last data packet
-                                 * sent: this is due to the fact that the packet has been acknowledged by the recipient.
+                                 * This event is delivered to the node when the something went wrong trying to send a
+                                 * data packet => it waits some time and tries again.
+                                 * Clear the SENDING flag before
                                  */
 
+                                state->state&=~SENDING;
                                 send_data_packet(state);
                         }
                         break;
@@ -622,13 +624,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         if(state->state&RUNNING) {
 
                                 /*
-                                 * The recipient of the last data packet sent has received it and has replied with an ack,
-                                 * which has been successfully delivered on its turn => signal the event to the forwarding
-                                 * engine: this will remove the last packet from the head of the output queue and will also
-                                 * inform the link estimator
+                                 * The recipient of the last data packet sent has received it and has replied with an
+                                 * ack => signal the event to the FORWARDING ENGINE, which informs the LINK ESTIMATOR on
+                                 * its turn, in order to update the estimation of the link quality
                                  */
 
-                                receive_ack(true, state);
+                                state->last_packet_acked=(ctp_data_packet*)event_content;
                         }
                         break;
 
