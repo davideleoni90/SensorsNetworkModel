@@ -133,7 +133,7 @@ unsigned char find_estimator_entry(unsigned int neighbor,link_estimator_table_en
          * provided ID is found
          */
 
-        for(index=0;index<neighbor_table_size;index++){
+        for(index=0;index<NEIGHBOR_TABLE_SIZE;index++){
 
                 /*
                  * Only check entries with VALID flag set
@@ -219,7 +219,7 @@ unsigned char find_estimator_worst_entry(unsigned char etx_threshold,link_estima
          * Scan the estimator table looking for the entry with the highest ETX beyond the given threshold
          */
 
-        for(i=0;i<neighbor_table_size;i++){
+        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
 
                 /*
                  * Check whether the current entry is VALID: if not, jump to the next
@@ -306,7 +306,7 @@ unsigned char find_random_entry(link_estimator_table_entry* link_estimator_table
          * Scan the estimator table to count the number of candidates
          */
 
-        for(i=0;i<neighbor_table_size;i++){
+        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
 
                 /*
                  * The entry is a candidate if it's VALID
@@ -342,17 +342,16 @@ unsigned char find_random_entry(link_estimator_table_entry* link_estimator_table
                 return INVALID_ENTRY;
 
         /*
-         * At least one entry is eligible => get the value of counter, which is used to randomly select an entry: it
-         * is the result of modulo division of a random value by the number of candidates
+         * At least one entry is eligible => get the value of counter, which is used to randomly select an entry
          */
 
-        counter= ((unsigned char)Random()) % candidates;
+        counter= (unsigned char)RandomRange(0,candidates);
 
         /*
          * The entry selected is the "counter-th" entry which is VALID AND NOT PINNED NOR MATURE
          */
 
-        for(i=0;i<neighbor_table_size;i++){
+        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
 
                 /*
                  * Discard invalid entries
@@ -405,7 +404,7 @@ unsigned char find_estimator_free_entry(link_estimator_table_entry* link_estimat
          * Look for all the entries of the neighbor table and stop when one is not valid
          */
 
-        for(index=0;index<neighbor_table_size;index++){
+        for(index=0;index<NEIGHBOR_TABLE_SIZE;index++){
 
                 /*
                  * Skip valid entries
@@ -462,7 +461,7 @@ void init_link_estimator_table(link_estimator_table_entry* link_estimator_table)
          * Set all the entries
          */
 
-        for(i=0;i<neighbor_table_size;i++){
+        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
                 link_estimator_table[i].flags=0;
                 link_estimator_table[i].neighbor=UINT_MAX-1;
         }
@@ -1019,7 +1018,7 @@ void update_ingoing_quality(unsigned int neighbor,link_estimator_table_entry* li
          * Scan the estimator table looking for the entry corresponding to the ID of the neighbor
          */
 
-        for(i=0;i<neighbor_table_size;i++){
+        for(i=0;i<NEIGHBOR_TABLE_SIZE;i++){
 
                 /*
                  * Get the current entry

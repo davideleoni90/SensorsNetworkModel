@@ -1,4 +1,4 @@
-#include <bits/mathcalls.h>
+#include <math.h>
 #include "link_layer.h"
 #include "physical_layer.h"
 
@@ -56,8 +56,6 @@ double csma_sensitivity=CSMA_SENSITIVITY;
 
 /* GLOBAL VARIABLES - end */
 
-extern unsigned long long ticks_per_sec;
-
 /*
  * PARSE SIMULATION PARAMETERS FOR THE LINK LAYER
  */
@@ -89,7 +87,7 @@ void parse_link_layer_parameters(void* event_content){
         if(IsParameterPresent(event_content, "csma_ack_time"))
                 csma_ack_time=(unsigned int)GetParameterInt(event_content,"csma_ack_time");
         if(IsParameterPresent(event_content, "csma_sensitivity"))
-                csma_sensitivity=(unsigned int)GetParameterDouble(event_content,"csma_sensitivity");
+                csma_sensitivity=GetParameterDouble(event_content,"csma_sensitivity");
 }
 
 /*
@@ -173,16 +171,14 @@ void start_csma(node_state* state){
          * The backoff time: first set it to a random value in the range [CSMA_INIT_LOW,CSMA_INIT_HIGH]
          */
 
-        simtime_t backoff=Random();
-        backoff=fmod(backoff,(double)csma_init_high-csma_init_low);
-        backoff+=(double)csma_init_low;
+        simtime_t backoff=(double)RandomRange(csma_init_low,csma_init_high);
 
         /*
-         * The backoff time is in terms of symbols => multiply it by the number of simulation ticks per symbol, i.e.
-         * the number of simulation ticks per second over the number of symbols per second
+         * The backoff time is in terms of symbols => divide by the number of symbols per second to get the back off
+         * time in seconds
          */
 
-        backoff*=(ticks_per_sec/csma_symbols_per_sec);
+        backoff/=(double)csma_symbols_per_sec;
 
         /*
          * Set the virtual time when the node will first check whether the channel is free: it has to wait a time equal
@@ -252,13 +248,12 @@ void check_channel(node_state* state){
 
                 /*
                  * The link layer is sure enough that the channel is free => the radio transceiver has to be switched
-                 * from reception mode to transmission mode => the packet will be transmitted with a delay, in terms of
-                 * simulation ticks, equal to:
+                 * from reception mode to transmission mode => the packet will be transmitted with a delay equal to:
                  *
-                 * RXTX_DELAY(in symbols)*TICKS_PER_SYMBOL
+                 * RXTX_DELAY(in symbols)/SYMBOLS_PER_SEC
                  */
 
-                simtime_t rxtx_switch_delay=csma_rxtx_delay*(ticks_per_sec/csma_symbols_per_sec);
+                simtime_t rxtx_switch_delay=(double)csma_rxtx_delay/(double)csma_symbols_per_sec;
 
                 /*
                  * Set the state of the link layer and of the underlying radio to "transmitting"
@@ -287,14 +282,12 @@ void check_channel(node_state* state){
                  * [0,(CSM_HIGH-CSMA_LOW)*CSMA_EXPONENT_BASE^n]
                  *
                  * and add it to CSMA_LOW.
-                 * Finally, multiple by the number of ticks per symbol
+                 * Finally, multiple by the number of symbols per second
                  */
 
-                simtime_t backoff=Random();
-                simtime_t modulo=csma_high-csma_low;
-                modulo*=pow(csma_exponent_base,state->backoff_count);
-                backoff=fmod(backoff,modulo);
-                backoff*=(ticks_per_sec/csma_symbols_per_sec);
+                simtime_t backoff=RandomRange(0,(unsigned int)((csma_high-csma_low)*pow(csma_exponent_base,
+                                                                                        state->backoff_count)));
+                backoff/=(double)csma_symbols_per_sec;
 
                 /*
                  * Schedule a new event to tell this node to check whether the channel is free after the backoff time
@@ -355,8 +348,8 @@ void start_frame_transmission(node_state* state){
         unsigned char type=state->link_layer_outgoing_type;
 
         /*
-         * Duration of the transmission of the frame, i.e. the number of simulation ticks it takes for the neighbour
-         * nodes to successfully receive a packet (including the time to transmit an acknowledgment, if required)
+         * Duration of the transmission of the frame, i.e. the time it takes for the neighbour nodes to successfully
+         * receive a packet (including the time to transmit an acknowledgment, if required).
          * This depends on the number of bytes in the data frame (comprising the preamble added by the physical layer)
          * and on the number of bytes of the acknowledgment frame (if it has to be sent) => it is generally referred to
          * as transmission delay; the propagation delay, i.e. the time it takes for the electromagnetic wave associated
@@ -370,7 +363,7 @@ void start_frame_transmission(node_state* state){
          * Then set the duration of the transmission to the number of symbols in the frame
          */
 
-        simtime_t duration=bits_length/csma_bits_per_symbol;
+        simtime_t duration=bits_length/(double)csma_bits_per_symbol;
 
         /*
          * Add the length (in symbols) of the preamble added by the physical layer
@@ -388,10 +381,10 @@ void start_frame_transmission(node_state* state){
                 duration+=csma_ack_time;
 
         /*
-         * Transform the duration from symbols to ticks of the simulation
+         * Transform the duration from symbols to seconds
          */
 
-        duration*=(ticks_per_sec/csma_symbols_per_sec);
+        duration/=(double)csma_symbols_per_sec;
 
         /*
          * Set the duration of the transmission in the link layer frame of the packet
@@ -411,7 +404,7 @@ void start_frame_transmission(node_state* state){
          * reception mode has to be added before the transmission can be regarded as finished
          */
 
-        duration+=csma_rxtx_delay*(ticks_per_sec/csma_symbols_per_sec);
+        duration+=csma_rxtx_delay/(double)csma_symbols_per_sec;
 
         /*
          * Schedule a new event to signal that the transmission is finished and acknowledgment should have been received

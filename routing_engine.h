@@ -9,44 +9,58 @@ typedef struct _ctp_routing_frame ctp_routing_frame;
 typedef struct _node_state node_state;
 typedef struct _route_info route_info;
 
-#ifndef routing_table_size
-#define routing_table_size 10 // Number of entries in the routing table
-#endif
-
 /*
  * PARAMETERS RELATED TO THE ROUTING ENGINE
  */
 
-enum{
-        UPDATE_ROUTE_TIMER=8000, // After such interval of time, the route of the node is (re)computed (in ms)
-        INVALID_ADDRESS=0xFFFF, // Value used for the ID of neighbor that is not valid
+#ifndef ROUTING_TABLE_SIZE
+#define ROUTING_TABLE_SIZE 10 // Number of entries in the routing table
+#endif
 
-        /*
-         * Neighbors whose links have a 1-hop ETX bigger than or equal to this threshold can't be selected as parent
-         */
+#ifndef UPDATE_ROUTE_TIMER
+#define UPDATE_ROUTE_TIMER 8 // After such interval of time, the route of the node is (re)computed (in seconds)
+#endif
 
-        MAX_ONE_HOP_ETX=50,
-        INFINITE_ETX = 0xFFFF, // Highest value for ETX => it's used to avoid that neighbor is selected as parent
+#ifndef INVALID_ADDRESS
+#define INVALID_ADDRESS 0xFFFF // Value used for the ID of neighbor that is not valid
+#endif
 
-        /*
-         * If the current parent is not congested, a new parent is chosen only if the associated route has an ETX that
-         * is at least PARENT_SWITCH_THRESHOLD less than the ETX of the current route
-         */
+/*
+ * If the current parent is not congested, a new parent is chosen only if the associated route has an ETX that is at
+ * least PARENT_SWITCH_THRESHOLD less than the ETX of the current route
+ */
 
-        PARENT_SWITCH_THRESHOLD=15,
+#ifndef PARENT_SWITCH_THRESHOLD
+#define PARENT_SWITCH_THRESHOLD 15
+#endif
 
-        /*
-         * Minimum value (max frequency) for the interval between two beacons sent (in ms)
-         */
+/*
+ * Neighbors whose links have a 1-hop ETX bigger than or equal to this threshold can't be selected as parent
+ */
 
-        MIN_BEACONS_SEND_INTERVAL=125,
+#ifndef MAX_ONE_HOP_ETX
+#define MAX_ONE_HOP_ETX 50
+#endif
 
-        /*
-         * Maximum value (min frequency) for the interval between two beacons sent (in ms)
-         */
+#ifndef INFINITE_ETX
+#define INFINITE_ETX 0xFFFF // Highest value for ETX => it's used to avoid that neighbor is selected as parent
+#endif
 
-        MAX_BEACONS_SEND_INTERVAL=500000
-};
+/*
+ * Minimum value (max frequency) for the interval between two beacons sent (in seconds)
+ */
+
+#ifndef MIN_BEACONS_SEND_INTERVAL
+#define MIN_BEACONS_SEND_INTERVAL 0.125
+#endif
+
+/*
+ * Maximum value (min frequency) for the interval between two beacons sent (in seconds)
+ */
+
+#ifndef MAX_BEACONS_SEND_INTERVAL
+#define MAX_BEACONS_SEND_INTERVAL 500
+#endif
 
 /* ROUTING ENGINE API */
 

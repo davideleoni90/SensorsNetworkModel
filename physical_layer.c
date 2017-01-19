@@ -1,7 +1,5 @@
-#include <bits/mathcalls.h>
+#include <math.h>
 #include "physical_layer.h"
-#include "link_estimator.h"
-#include "application.h"
 #include "link_layer.h"
 
 /*
@@ -100,22 +98,19 @@ void init_physical_layer(node_state* state){
 }
 
 /*
- * ADD PENDING TRANSMISSION
+ * CREATE PENDING TRANSMISSION
  *
- * Create a new instance of type "pending_transmission" to keep track of a new pending transmission and add it to the
- * list of pending transmissions
+ * Create a new instance of type "pending_transmission" to keep track of a new pending transmission
  *
  * @state: pointer to the object representing the current state of the node
  * @type: byte telling whether the frame contains a beacon or a data packet
  * @frame: pointer to the frame carried by the signal
  * @power: power of the signal
- * @last: pointer to the last element in the list of pending transmissions
  *
  * Returns the address of the new instance
  */
 
-pending_transmission* add_pending_transmission(unsigned char type,void* frame, double power,
-                              pending_transmission* last){
+pending_transmission* create_pending_transmission(unsigned char type,void* frame, double power){
 
         /*
          * Allocate a new instance of type "pending_transmission"
@@ -173,12 +168,6 @@ pending_transmission* add_pending_transmission(unsigned char type,void* frame, d
          */
 
         new_transmission->power=power;
-
-        /*
-         * Add the new transmission after the last element of the list
-         */
-
-        last->next=new_transmission;
 
         /*
          * Return the address
@@ -329,6 +318,22 @@ void add_noise_entry(unsigned int node, double noise_floor, double white_noise){
 }
 
 /*
+ * COMPARE PENDING TRANSMISSIONS
+ *
+ * Given the pointers to two pending transmissions, this helper function compares their relevant fields and returns
+ * true if they all coincide, false otherwise
+ *
+ * @a: pointer to a pending transmission
+ * @b: pointer to the other pending transmission
+ */
+
+bool compare_pending_transmissions(pending_transmission*a,pending_transmission*b){
+        if(a->frame==b->frame && a->power==b->power && a->frame_type==b->frame_type)
+                return true;
+        return false;
+}
+
+/*
  * SEND ACK
  *
  * Function dedicated to the sending of the acknowledgement for a frame in case this contains a data packet. The ack
@@ -369,10 +374,28 @@ void send_ack(node_state* state,ctp_data_packet* packet){
  * @gain: strength of the new transmission (in dBm)
  * @type: byte telling whether the frame contains a beacon or a data packet
  * @frame: pointer to the frame carried by the signal
- * @duration: duration of the new tranmission
+ * @duration: duration of the new transmission
  */
 
 void new_pending_transmission(node_state* state, double gain, unsigned char type,void* frame,double duration){
+
+        /*
+         * Pointer to the new instance of type "pending_transmission" created for the new transmission
+         */
+
+        pending_transmission* new_pending_transmission=NULL;
+
+        /*
+         * Pointer to the last element in the list of pending transmissions
+         */
+
+        pending_transmission* last_transmission=NULL;
+
+        /*
+         * Counter of pending transmissions
+         */
+
+        unsigned int pending_transmissions_count=0;
 
         /*
          * Check if the node is running: if not, it will not receive the frame transmitted
@@ -417,8 +440,8 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
         }
 
         /*
-         * Go through the list of pending transmissions and check whether the current transmission makes
-         * the node miss some of them because they are too weak w.r.t to the new one
+         * Go through the list of pending transmissions and check whether the current transmission will cause the node
+         * missing some of them because they are too weak w.r.t to the new one
          */
 
         pending_transmission* current=state->pending_transmissions;
@@ -433,11 +456,17 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
                         current->lost=true;
 
                 /*
-                 * Go to next element of the list
+                 * Go to next element of the list and store the pointer to the last NOT NULL element
                  */
 
+                last_transmission=current;
                 current=current->next;
 
+                /*
+                 * Update the counter of pending transmissions
+                 */
+
+                pending_transmissions_count++;
         }
 
         /*
@@ -448,23 +477,47 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
         state->pending_transmissions_power+=pow(10.0, gain / 10.0);
 
         /*
-         * Add the new transmission at the end of the list and get the address
+         * Create an entry for the the new pending transmissions
          */
 
-        current=add_pending_transmission(type,frame,gain,current);
+        new_pending_transmission=create_pending_transmission(type,frame,gain);
+
+        /*
+         * Check if there are other pending transmissions
+         */
+
+        if(pending_transmissions_count){
+
+                /*
+                 * There are other pending transmissions => add the new transmission at the end of the list and get
+                 * the address
+                 */
+
+                last_transmission->next=new_pending_transmission;
+
+        }
+        else{
+
+                /*
+                 * This is the only pending transmission => set the pointer of the list of pending transmission to its
+                 * address
+                 */
+
+                state->pending_transmissions=new_pending_transmission;
+        }
 
         /*
          * Schedule a new event corresponding to the moment when the transmission will be finished
          */
 
-        ScheduleNewEvent(state->me,state->lvt+duration,TRANSMISSION_FINISHED,current
-                ,sizeof(pending_transmission));
+        ScheduleNewEvent(state->me,state->lvt+duration,TRANSMISSION_FINISHED,new_pending_transmission,
+                         sizeof(pending_transmission));
 }
 
 /*
  * TRANSMISSION FINISHED
  *
- * Helper function for the events of type BEACON_TRANSMISSION_FINISHED and DATA_PACKET_TRANSMISSION_FINISHED.
+ * Helper function for the event TRANSMISSION_FINISHED
  * It is in charge of removing the element of the finished transmission from the list of pending transmissions: if the
  * transmission has been successfully received by the node, it starts processing the associated frame
  *
@@ -508,7 +561,8 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                  * Check if the transmission analyzed is the predecessor
                  */
 
-                if(current_transmission->next==finished_transmission) {
+                if(current_transmission->next &&
+                        compare_pending_transmissions(current_transmission->next,finished_transmission)) {
 
                         /*
                          * Found the predecessor
@@ -523,7 +577,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                  * transmission that is finishing
                  */
 
-                if(current_transmission!=finished_transmission){
+                if(!compare_pending_transmissions(current_transmission,finished_transmission)){
                         if(current_transmission->power-csma_sensitivity<finished_transmission->power){
                                 current_transmission->lost=true;
                         }
@@ -630,7 +684,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          * Finally remove the element associated to the pending transmission
          */
 
-        free(finished_transmission);
+        //free(finished_transmission);
 
 }
 
@@ -774,7 +828,7 @@ double get_current_noise(unsigned int node){
          * Get a random value to be added to the mean value of the dynamic component of the noise
          */
 
-        double rand=(int)Random()%2000000;
+        double rand=RandomRange(0,2000000);
         rand/=1000000.0;
         rand-=1.0;
         rand*=noise_list[node].range;

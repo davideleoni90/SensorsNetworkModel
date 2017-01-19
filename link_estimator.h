@@ -7,52 +7,69 @@ typedef struct _ctp_routing_packet ctp_routing_packet;
 typedef struct _node_state node_state;
 typedef double simtime_t;
 
-#ifndef neighbor_table_size
-#define neighbor_table_size 10 // Number of entries in the link estimator table (aka neighbor table)
-#endif
-
 /*
  * PARAMETERS RELATED TO THE LINK ESTIMATOR
  */
 
-enum{
-        /*
-         * If a node has an 1-hop ETX bigger than this threshold, it is evicted from the estimator table in case a new
-         * entry has to added and the table itself is full
-         */
+#ifndef NEIGHBOR_TABLE_SIZE
+#define NEIGHBOR_TABLE_SIZE 10 // Number of entries in the link estimator table (aka neighbor table)
+#endif
 
-        EVICT_WORST_ETX_THRESHOLD=65,
+/*
+ * If a node has an 1-hop ETX bigger than this threshold, it is evicted from the estimator table in case a new entry has
+ * to added and the table itself is full
+ */
 
-        /*
-         * If a node has an 1-hop ETX bigger than this threshold, it is evicted from the estimator table if a new entry
-         * has to added and the table itself is full AND A FREE PLACE FOR THE ROOT NODE HAS TO BE FOUND
-         *
-         * Since the root is the most important, it's crucial to create an entry for it when a beacon by it is received
-         * => if the table is full, another node has to be replaced => with such a tighter threshold, which corresponds
-         * to one hop (recall that ETX is about ten times the number of hops), we are likely to find a victim node
-         */
+#ifndef EVICT_WORST_ETX_THRESHOLD
+#define EVICT_WORST_ETX_THRESHOLD 65
+#endif
 
-        EVICT_BEST_ETX_THRESHOLD=10,
+/*
+ * If a node has an 1-hop ETX bigger than this threshold, it is evicted from the estimator table if a new entry has to
+ * be added and the table itself is full AND A FREE PLACE FOR THE ROOT NODE HAS TO BE FOUND
+ *
+ * Since the root is the most important, it's crucial to create an entry for it when a beacon by it is received  => if
+ * the table is full, another node has to be replaced => with such a tighter threshold, which corresponds to one hop
+ * (recall that ETX is about ten times the number of hops), we are likely to find a victim node
+ */
 
-        /*
-         * If the number of beacons lost from a neighbor is bigger than this value, the entry for the neighbor is
-         * reinitialized
-         */
+#ifndef EVICT_BEST_ETX_THRESHOLD
+#define EVICT_BEST_ETX_THRESHOLD 10
+#endif
 
-        MAX_PKT_GAP=10,
+/*
+ * If the number of beacons lost from a neighbor is bigger than this value, the entry for the neighbor is reinitialized
+ */
 
-        /*
-         * If it's not possible to compute the link quality, the 1-hop ETX is set to the highest value as possible, so
-         * that the corresponding node will never be chosen as parent
-         */
+#ifndef MAX_PKT_GAP
+#define MAX_PKT_GAP 10
+#endif
 
-        VERY_LARGE_ETX_VALUE=0xffff,
-        ALPHA=9, // The link estimation is exponentially decayed with this parameter ALPHA
-        DLQ_PKT_WINDOW=5, // # of packets to be sent before updating the outgoing quality of the link to a neighbor
-        BLQ_PKT_WINDOW=3, // # of beacons to be received before updating the ingoing quality of the link to a neighbor
-        INVALID_ENTRY=0xff // Value returned when the entry corresponding to a neighbor is not found
+/*
+ * If it's not possible to compute the link quality, the 1-hop ETX is set to the highest value as possible, so that the
+ * corresponding node will never be chosen as parent
+ */
 
-};
+#ifndef VERY_LARGE_ETX_VALUE
+#define VERY_LARGE_ETX_VALUE 0xffff
+#endif
+
+#ifndef ALPHA
+#define ALPHA 9 // The link estimation is exponentially decayed with this parameter ALPHA
+#endif
+
+#ifndef DLQ_PKT_WINDOW
+#define DLQ_PKT_WINDOW 5 // # of packets to be sent before updating the outgoing quality of the link to a neighbor
+#endif
+
+#ifndef BLQ_PKT_WINDOW
+#define BLQ_PKT_WINDOW 3 // # of beacons to be received before updating the ingoing quality of the link to a neighbor
+#endif
+
+#ifndef INVALID_ENTRY
+#define INVALID_ENTRY 0xff // Value returned when the entry corresponding to a neighbor is not found
+#endif
+
 
 /*
  * Structure that describes an entry in the link estimator table (or neighbor table): it reports the features of a link

@@ -27,15 +27,13 @@
  * Default values of the parameters for the routing engine (check routing_engine.h for a description)
  */
 
-unsigned int update_route_timer=UPDATE_ROUTE_TIMER;
+double update_route_timer=UPDATE_ROUTE_TIMER;
 unsigned int max_one_hop_etx=MAX_ONE_HOP_ETX;
 unsigned int parent_switch_threshold=PARENT_SWITCH_THRESHOLD;
-unsigned int min_beacons_send_interval=MIN_BEACONS_SEND_INTERVAL;
-unsigned int max_beacons_send_interval=MAX_BEACONS_SEND_INTERVAL;
+double min_beacons_send_interval=MIN_BEACONS_SEND_INTERVAL;
+double max_beacons_send_interval=MAX_BEACONS_SEND_INTERVAL;
 
 /* GLOBAL VARIABLES - end */
-
-extern unsigned long long ticks_per_sec;
 
 /*
  * PARSE SIMULATION PARAMETERS FOR THE ROUTING ENGINE
@@ -44,15 +42,15 @@ extern unsigned long long ticks_per_sec;
 void parse_routing_engine_parameters(void* event_content){
 
         if(IsParameterPresent(event_content, "update_route_timer"))
-                update_route_timer=(unsigned int)GetParameterInt(event_content,"update_route_timer");
+                update_route_timer=GetParameterDouble(event_content,"update_route_timer");
         if(IsParameterPresent(event_content, "max_one_hop_etx"))
                 max_one_hop_etx=(unsigned int)GetParameterInt(event_content,"max_one_hop_etx");
         if(IsParameterPresent(event_content, "parent_switch_threshold"))
                 parent_switch_threshold=(unsigned int)GetParameterInt(event_content,"parent_switch_threshold");
         if(IsParameterPresent(event_content, "min_beacons_send_interval"))
-                min_beacons_send_interval=(unsigned int)GetParameterInt(event_content,"min_beacons_send_interval");
+                min_beacons_send_interval=GetParameterDouble(event_content,"min_beacons_send_interval");
         if(IsParameterPresent(event_content, "max_beacons_send_interval"))
-                max_beacons_send_interval=(unsigned int)GetParameterInt(event_content,"max_beacons_send_interval");
+                max_beacons_send_interval=GetParameterDouble(event_content,"max_beacons_send_interval");
 }
 
 
@@ -120,12 +118,10 @@ void start_routing_engine(node_state* state){
          * The simulator is in charge of re-setting the timer every time it is fired
          * The route of the root node is set when the CTP stack is initialized and does not obviously changes anymore
          * => the root node it not notified this event.
-         * The interval has to be first converted from milli-seconds and then from seconds to simulation ticks (virtual
-         * time)
          */
 
         if(!state->root)
-                wait_until(state->me,state->lvt+((update_route_timer/1000)*ticks_per_sec),UPDATE_ROUTE_TIMER_FIRED);
+                wait_until(state->me,state->lvt+update_route_timer,UPDATE_ROUTE_TIMER_FIRED);
 
         /*
          * Start the periodic timer for sending beacons: the interval is BEACON_MIN_INTERVAL at first, and is increased
@@ -355,7 +351,7 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
          * and the table is full => discard packet
          */
 
-        if(index==routing_table_size){
+        if(index==ROUTING_TABLE_SIZE){
                 return;
         }
         else if(index==state->neighbors){
@@ -706,13 +702,20 @@ void set_beacon_sending_time(node_state* state){
          * Time to wait before sending another beacon; it is chosen within the interval [I_b/2 , I_b]
          */
 
-        unsigned long beacon_sending_time;
+        double beacon_sending_time;
 
         /*
          * Get the upper bound for the beacon sending time
          */
 
         beacon_sending_time=state->current_interval;
+
+        /*
+         * Since the beacon sending time may be less than one second, temporarily work in milliseconds, in order to ease
+         * calculations
+         */
+
+        beacon_sending_time*=1000;
 
         /*
          * Then get the lower bound for the beacon sending time
@@ -725,19 +728,19 @@ void set_beacon_sending_time(node_state* state){
          * sending time lies in [I_b/2 , I_b]
          */
 
-        beacon_sending_time+= ((unsigned long)Random())%beacon_sending_time;
+        beacon_sending_time+= RandomRange(0,(unsigned int)beacon_sending_time);
 
         /*
-         * Store the new sending time in the state object
+         * Store the new sending time in the state object (back in seconds)
          */
 
-        state->beacon_sending_time=beacon_sending_time;
+        state->beacon_sending_time=beacon_sending_time/1000.0;
 
         /*
-         * Schedule the sending of the next beacon at the chosen sending time (in simulation ticks)
+         * Schedule the sending of the next beacon at the chosen sending time
          */
 
-        wait_until(state->me,state->lvt+((beacon_sending_time/1000)*ticks_per_sec),SEND_BEACONS_TIMER_FIRED);
+        wait_until(state->me,state->lvt+(beacon_sending_time/1000.0),SEND_BEACONS_TIMER_FIRED);
 }
 
 
@@ -781,13 +784,13 @@ void schedule_beacons_interval_update(node_state* state){
          * Calculate time left before the beacons interval has to be updated
          */
 
-        unsigned long remaining=state->current_interval-state->beacon_sending_time;
+        double remaining=state->current_interval-state->beacon_sending_time;
 
         /*
          * Request an event scheduled at the time in the future when the update will have to be performed
          */
 
-        wait_until(state->me,state->lvt+((remaining/1000)*ticks_per_sec),SET_BEACONS_TIMER);
+        wait_until(state->me,state->lvt+remaining,SET_BEACONS_TIMER);
 }
 
 /*

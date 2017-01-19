@@ -40,17 +40,15 @@ void cache_remove(unsigned char offset,node_state* state);
  */
 
 unsigned int max_retries=MAX_RETRIES;
-unsigned int data_packet_transmission_offset=DATA_PACKET_RETRANSMISSION_OFFSET;
-unsigned int data_packet_transmission_delta=DATA_PACKET_RETRANSMISSION_DELTA;
-unsigned int no_route_offset=NO_ROUTE_OFFSET;
-unsigned int send_packet_timer=SEND_PACKET_TIMER;
+double data_packet_transmission_offset=DATA_PACKET_RETRANSMISSION_OFFSET;
+double data_packet_transmission_delta=DATA_PACKET_RETRANSMISSION_DELTA;
+double no_route_offset=NO_ROUTE_OFFSET;
+double send_packet_timer=SEND_PACKET_TIMER;
 unsigned int min_payload=MIN_PAYLOAD;
 unsigned int max_payload=MAX_PAYLOAD;
 
 
 /* GLOBAL VARIABLES - end */
-
-extern unsigned long long ticks_per_sec;
 
 /*
  * PARSE SIMULATION PARAMETERS FOR THE FOWARDING ENGINE
@@ -61,15 +59,13 @@ void parse_forwarding_engine_parameters(void* event_content) {
         if (IsParameterPresent(event_content, "max_retries"))
                 max_retries = (unsigned int) GetParameterInt(event_content, "max_retries");
         if (IsParameterPresent(event_content, "data_packet_transmission_offset"))
-                data_packet_transmission_offset = (unsigned int) GetParameterInt(event_content,
-                                                                                 "data_packet_transmission_offset");
+                data_packet_transmission_offset = GetParameterDouble(event_content,"data_packet_transmission_offset");
         if (IsParameterPresent(event_content, "data_packet_transmission_delta"))
-                data_packet_transmission_delta = (unsigned int) GetParameterInt(event_content,
-                                                                                 "data_packet_transmission_delta");
+                data_packet_transmission_delta = GetParameterDouble(event_content, "data_packet_transmission_delta");
         if (IsParameterPresent(event_content, "no_route_offset"))
-                no_route_offset = (unsigned int) GetParameterInt(event_content,"no_route_offset");
+                no_route_offset = GetParameterDouble(event_content,"no_route_offset");
         if (IsParameterPresent(event_content, "send_packet_timer"))
-                send_packet_timer = (unsigned int) GetParameterInt(event_content,"send_packet_timer");
+                send_packet_timer = GetParameterDouble(event_content,"send_packet_timer");
         if (IsParameterPresent(event_content, "min_payload"))
                 min_payload = (unsigned int) GetParameterInt(event_content,"min_payload");
         if (IsParameterPresent(event_content, "max_payload"))
@@ -119,7 +115,7 @@ forwarding_queue_entry* forwarding_pool_get(node_state* state){
          * If "index" is now beyond the limit of the pool, set it to the first position
          */
 
-        if(state->forwarding_pool_index==forwarding_pool_depth)
+        if(state->forwarding_pool_index==FORWARDING_POOL_DEPTH)
                 state->forwarding_pool_index=0;
 
         /*
@@ -150,7 +146,7 @@ void forwarding_pool_put(forwarding_queue_entry* entry,node_state* state){
          * Check if the pool is full: an entry can be added only if not full
          */
 
-        if(state->forwarding_pool_count<forwarding_pool_depth){
+        if(state->forwarding_pool_count<FORWARDING_POOL_DEPTH){
 
                 /*
                  * Get the index of a free position in the pool where the entry can be stored
@@ -162,8 +158,8 @@ void forwarding_pool_put(forwarding_queue_entry* entry,node_state* state){
                  * If the index is beyond the limit of the pool, correct it
                  */
 
-                if(index>=forwarding_pool_depth)
-                        index-=forwarding_pool_depth;
+                if(index>=FORWARDING_POOL_DEPTH)
+                        index-=FORWARDING_POOL_DEPTH;
 
                 /*
                  * Put the given entry in the first free place
@@ -204,7 +200,7 @@ bool forwarding_queue_enqueue(forwarding_queue_entry* entry,node_state* state){
          * Check if there's free space in the queue
          */
 
-        if(state->forwarding_queue_count<forwarding_queue_depth){
+        if(state->forwarding_queue_count<FORWARDING_QUEUE_DEPTH){
 
                 /*
                  * There's enough space in the queue for at least one new element => insert the new element at position
@@ -231,7 +227,7 @@ bool forwarding_queue_enqueue(forwarding_queue_entry* entry,node_state* state){
                  * This is mandatory to implement the FIFO logic
                  */
 
-                if(state->forwarding_queue_tail==forwarding_queue_depth)
+                if(state->forwarding_queue_tail==FORWARDING_QUEUE_DEPTH)
                         state->forwarding_queue_tail=0;
 
                 /*
@@ -286,7 +282,7 @@ void forwarding_queue_dequeue(node_state* state){
                  * This is mandatory to implement the FIFO logic
                  */
 
-                if(state->forwarding_queue_head==forwarding_queue_depth)
+                if(state->forwarding_queue_head==FORWARDING_QUEUE_DEPTH)
                         state->forwarding_queue_head=0;
         }
 
@@ -385,7 +381,7 @@ unsigned char cache_lookup(ctp_data_packet_frame* data_frame,node_state* state){
                  * Get the index of the entry
                  */
 
-                index=(state->output_cache_first+i)%(unsigned char)cache_size;
+                index=(state->output_cache_first+i)%(unsigned char)CACHE_SIZE;
 
                 /*
                  * The data frame of the element of the cache analyzed
@@ -440,7 +436,7 @@ void cache_enqueue(ctp_data_packet_frame* data_frame,node_state* state){
          * Check whether the cache is full
          */
 
-        if(state->output_cache_count==cache_size){
+        if(state->output_cache_count==CACHE_SIZE){
 
                 /*
                  * The output cache is full => remove the least recently inserted packet from it
@@ -463,7 +459,7 @@ void cache_enqueue(ctp_data_packet_frame* data_frame,node_state* state){
          * Get the data frame of the entry where the most recently accessed element will be put
          */
 
-        new_data_frame=&state->output_cache[(state->output_cache_first+state->output_cache_count)%cache_size].
+        new_data_frame=&state->output_cache[(state->output_cache_first+state->output_cache_count)%CACHE_SIZE].
                 data_packet_frame;
 
         /*
@@ -521,7 +517,7 @@ void cache_remove(unsigned char offset,node_state* state){
 
         if(!offset) {
                 state->output_cache_first+=1;
-                state->output_cache_first = (state->output_cache_first) % (unsigned char)cache_size;
+                state->output_cache_first = (state->output_cache_first) % (unsigned char)CACHE_SIZE;
         }
         else{
 
@@ -537,7 +533,7 @@ void cache_remove(unsigned char offset,node_state* state){
                  */
 
                 for(i=offset;i<state->output_cache_count;i++){
-                        memcpy(&state->output_cache[(offset+i)%cache_size],&state->output_cache[(offset+i+1)%cache_size]
+                        memcpy(&state->output_cache[(offset+i)%CACHE_SIZE],&state->output_cache[(offset+i+1)%CACHE_SIZE]
                                 ,sizeof(ctp_data_packet));
                 }
         }
@@ -566,13 +562,14 @@ void schedule_retransmission(node_state* state){
 
         /*
          * Schedule the new sending after an interval of time whose length is randomly selected in the range
-         * [delta,interval+delta]
+         * [delta,interval-1+delta].
+         * Do calculation in milliseconds
          */
 
-        unsigned int interval=(((unsigned int) Random())%data_packet_transmission_offset)+
-                data_packet_transmission_delta;
-
-        wait_until(state->me,state->lvt+(ticks_per_sec/(interval*1000)),RETRANSMITT_DATA_PACKET);
+        double interval=RandomRange((unsigned int)(data_packet_transmission_delta*1000),
+                                    (unsigned int)((data_packet_transmission_delta+
+                                            data_packet_transmission_offset-1)*1000));
+        wait_until(state->me,state->lvt+interval,RETRANSMITT_DATA_PACKET);
 }
 
 /*
@@ -591,7 +588,7 @@ void start_forwarding_engine(node_state* state){
          * First initialize the forwarding pool
          */
 
-        state->forwarding_pool_count=forwarding_pool_depth;
+        state->forwarding_pool_count=FORWARDING_POOL_DEPTH;
         state->forwarding_pool_index=0;
 
         /*
@@ -644,7 +641,7 @@ void start_forwarding_engine(node_state* state){
                  * The simulator is in charge of re-setting the timer every time it is fired
                  */
 
-                wait_until(state->me,state->lvt+(ticks_per_sec/SEND_PACKET_TIMER),SEND_PACKET_TIMER_FIRED);
+                wait_until(state->me,state->lvt+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
 }
 
 /*
@@ -730,7 +727,7 @@ bool send_data_packet(node_state* state) {
                  * time equal to NO_ROUTE_RETRY; during this time, hopefully the node has fixed its route.
                  */
 
-                wait_until(state->me,state->lvt+(ticks_per_sec/no_route_offset),RETRANSMITT_DATA_PACKET);
+                wait_until(state->me,state->lvt+no_route_offset,RETRANSMITT_DATA_PACKET);
 
                 /*
                  * Return false, since an immediate further invocation will be of no help: it is necessary to wait at
@@ -814,6 +811,9 @@ bool send_data_packet(node_state* state) {
          */
 
         submitted=send_frame(state,parent,CTP_DATA_PACKET);
+        printf("Node %d is sending packet with payload %d to node %d\n",state->me,first_entry->packet.payload,
+               first_entry->packet.link_frame.sink);
+        fflush(stdout);
 
         /*
          * If the packet has been successfully sumbitted, set the flag SENDING
@@ -902,7 +902,7 @@ void create_data_packet(node_state* state){
                  * case, the variable "forwarding_queue_count" is less than the depth of the queue
                  */
 
-                if (state->forwarding_queue_count < forwarding_queue_depth) {
+                if (state->forwarding_queue_count < FORWARDING_QUEUE_DEPTH) {
 
                         /*
                          * The function that is in charge of actually sending the packet, works as follows;
@@ -1370,7 +1370,7 @@ bool is_congested(node_state* state){
          * Return true if more than half is full...
          */
 
-        if(count>forwarding_queue_depth/2)
+        if(count>FORWARDING_QUEUE_DEPTH/2)
                 return true;
 
         /*

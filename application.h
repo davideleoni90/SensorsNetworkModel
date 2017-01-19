@@ -5,7 +5,7 @@
 #include "routing_engine.h"
 #include "forwarding_engine.h"
 #include <ROOT-Sim.h>
-#include <bits/mathdef.h>
+#include <math.h>
 
 
 /*
@@ -74,7 +74,6 @@ enum{
  */
 
 enum{
-        TICKS_PER_SEC=10000000000ULL, // Number of simulation ticks per second
         MAX_TIME=1000, // Upper bound of data packets received by the root for the simulation to stop
 
         /*
@@ -315,7 +314,7 @@ typedef struct _node_state{
          * to a neighbor node
          */
 
-        link_estimator_table_entry link_estimator_table[neighbor_table_size];
+        link_estimator_table_entry link_estimator_table[NEIGHBOR_TABLE_SIZE];
 
         /*
          * BEACON SEQUENCE NUMBER
@@ -351,13 +350,13 @@ typedef struct _node_state{
          * The current value of I_b (interval between sending of two successive beacons)
          */
 
-        unsigned long current_interval;
+        double current_interval;
 
         /*
          * Time to wait before sending another beacon; it is chosen within the interval [I_b/2 , I_b]
          */
 
-        unsigned long beacon_sending_time;
+        double beacon_sending_time;
 
         /*
          * ROUTING TABLE
@@ -367,7 +366,7 @@ typedef struct _node_state{
          * value as parent
          */
 
-        routing_table_entry routing_table[routing_table_size];
+        routing_table_entry routing_table[ROUTING_TABLE_SIZE];
         unsigned char neighbors; // Number of active entries in the routing table
 
         /* ROUTING ENGINE FIELDS - end */
@@ -393,7 +392,7 @@ typedef struct _node_state{
          * 2-forwarding_pool_index
          */
 
-        forwarding_queue_entry forwarding_pool[forwarding_pool_depth];
+        forwarding_queue_entry forwarding_pool[FORWARDING_POOL_DEPTH];
         unsigned char forwarding_pool_count; // Number of elements in the pool
         unsigned char forwarding_pool_index; // Index of the array where the next entry put will be collocated
 
@@ -423,7 +422,7 @@ typedef struct _node_state{
          * it is then dequeued
          */
 
-        forwarding_queue_entry* forwarding_queue[forwarding_queue_depth];
+        forwarding_queue_entry* forwarding_queue[FORWARDING_QUEUE_DEPTH];
 
         unsigned char forwarding_queue_count; // The counter of the elements in the forwarding queue
         unsigned char forwarding_queue_head; // The index of the first element in the queue (least recently added)
@@ -457,7 +456,7 @@ typedef struct _node_state{
          * least recently used is removed
          */
 
-        ctp_data_packet output_cache[cache_size];
+        ctp_data_packet output_cache[CACHE_SIZE];
 
         unsigned char output_cache_count; // Number of sent data packets cached
         unsigned char output_cache_first; // Index of the entry in the cache that was least recently added

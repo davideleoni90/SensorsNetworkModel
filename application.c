@@ -3,10 +3,8 @@
 #include <string.h>
 #include <ROOT-Sim.h>
 #include "application.h"
-#include "forwarding_engine.h"
 #include "physical_layer.h"
 #include "link_layer.h"
-#include <math.h>
 #include <limits.h>
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
@@ -14,7 +12,6 @@
 unsigned long collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
 unsigned long collected_packets_goal=COLLECTED_DATA_PACKETS_GOAL;
 unsigned long max_simulation_time=MAX_TIME;
-unsigned long long ticks_per_sec=TICKS_PER_SEC;
 
 /*
  * The vector containing a counter of packets received by the root of the collection tree from the other nodes
@@ -259,8 +256,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                         read_input_file(GetParameterString(event_content, "input"));
                                 }
                                 else{
-                                        printf("[FATAL ERROR] The path a to file containing the topology of the network"
-                                                       "is mandatory => "
+                                        printf("[FATAL ERROR] The path to a file containing the configuration  of the "
+                                                       "network"
+                                                       " is mandatory => "
                                                        "specify it after "
                                                        "the argument \"path\"\n");
                                         free((state));
@@ -298,7 +296,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * that the time to start the simulation has come
                                  */
                                 for(i=0;i<n_prc_tot;i++)
-                                        ScheduleNewEvent(i,now+(simtime_t)Random(),START_NODE,NULL,0);
+                                        //ScheduleNewEvent(i,now+(simtime_t)Random(),START_NODE,NULL,0);
+                                        ScheduleNewEvent(i,now+1,START_NODE,NULL,0);
 
                         }
 
@@ -402,8 +401,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * same amount of time, starting from now
                                  */
 
-                                wait_until(me, now + ((update_route_timer/1000)*ticks_per_sec),
-                                           UPDATE_ROUTE_TIMER_FIRED);
+                                wait_until(me, now + update_route_timer,UPDATE_ROUTE_TIMER_FIRED);
                         }
                         break;
 
@@ -494,7 +492,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * of time, starting from now
                                  */
 
-                                wait_until(me, now + (ticks_per_sec/send_packet_timer), SEND_PACKET_TIMER_FIRED);
+                                wait_until(me, now + send_packet_timer, SEND_PACKET_TIMER_FIRED);
                         }
                         break;
 
@@ -712,7 +710,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
                  * If the value of virtual time is beyond the limit, stop the simulation
                  */
 
-                if(((int)(((node_state*)snapshot)->lvt)%MAX_TIME==0) &&( ((node_state*)snapshot)->lvt>1)){
+                if(((int)(((node_state*)snapshot)->lvt)%max_simulation_time==0) &&( ((node_state*)snapshot)->lvt>1)){
                         printf("\n\nSimulation stopped because reached the limit of time:%f\n"
                                        "Packets collected by root:%lu\n"
                                 ,((node_state*)snapshot)->lvt,collected_packets);
@@ -831,6 +829,97 @@ void wait_until(unsigned int me,simtime_t timestamp,unsigned int type){
 }
 
 /*
+ * PARSE GAIN ENTRY
+ *
+ * Parse a line of the input file containing the gain of a link and stores the values read. The expected syntax is
+ *
+ * "source"\t"sink"\t"gain"
+ *
+ * @tokens: array containing string extracted from the line
+ */
+
+void parse_gain_entry(const char* tokens[]){
+
+        /*
+         * ID of the source node of the link
+         */
+
+        unsigned int source;
+
+        /*
+         * ID of the sink node of the link
+         */
+
+        unsigned int sink;
+
+        /*
+         * The gain of the link
+         */
+
+        double gain;
+
+        /*
+         * Parse parameters
+         */
+
+        sscanf(tokens[0],"%d",&source);
+        sscanf(tokens[1],"%d",&sink);
+        sscanf(tokens[2],"%lf",&gain);
+
+        /*
+         * Store parameters in a new instance of type "gain_entry"
+         */
+
+        add_gain_entry(source,sink,gain);
+}
+
+/*
+ * PARSE NOISE ENTRY
+ *
+ * Parse a line of the input file containing the floor and range of the noise affecting a node and stores the values
+ * read. The expected syntax is
+ *
+ * "node"\t"floor"\t"range"
+ *
+ * @tokens: array containing string extracted from the line
+ */
+
+void parse_noise_entry(const char* tokens[]){
+
+        /*
+         * ID of the node
+         */
+
+        unsigned int node;
+
+        /*
+         * Noise floor
+         */
+
+        double floor;
+
+        /*
+         * Range of the noise
+         */
+
+        double range;
+
+        /*
+         * Parse parameters
+         */
+
+        sscanf(tokens[0],"%d",&node);
+        sscanf(tokens[1],"%lf",&floor);
+        sscanf(tokens[2],"%lf",&range);
+
+        /*
+         * Store parameters in a new instance of type "noise_entry"
+         */
+
+        add_noise_entry(node,floor,range);
+}
+
+/*
  * READ INPUT FILE
  *
  * Read the input file containing the list of the links between nodes, including the gain of each wireless link; also
@@ -861,6 +950,12 @@ void read_input_file(const char* path){
          */
 
         unsigned int lines=0;
+
+        /*
+         * Index variable
+         */
+
+        unsigned int i;
 
         /*
          * Parameters required only by the function "getline": if "lineptr" is set to NULL before the call and "len" is
@@ -898,8 +993,8 @@ void read_input_file(const char* path){
          * Initialize pointers to null
          */
 
-        for(int i=0;i<n_prc_tot;i++)
-                gains_list[i]=NULL;
+        //for(i=0;i<n_prc_tot;i++)
+                //gains_list[i]=NULL;
 
         /*
          * Allocates an array containing an instance of type "noise_entry" for each node: this will be initialized to
@@ -916,26 +1011,23 @@ void read_input_file(const char* path){
         while(getline(&lineptr,&len,file)!=-1){
 
                 /*
-                 * Array of tokens after the first word in a line. In case of line describing the noise, they are:
-                 *
-                 * 1-ID of the node
-                 * 2-node's noise floor
-                 * 3-node's white gaussian noise
-                 *
-                 * In case of line describing a link, they are:
-                 *
-                 * 1-ID of the source node of the link
-                 * 2-ID of the sink node of the link
-                 * 3-gain of the link
+                 * The array containing tokens extracted
                  */
 
-                double tokens[3];
+                const char* tokens[3];
 
                 /*
-                 * Index variable for the remaining tokens
+                 * Index variable
                  */
 
-                unsigned char index=0;
+                unsigned short index=0;
+
+                /*
+                 * Remove the trailing "\n"
+                 */
+
+                if(lineptr[strlen(lineptr)-1]=='\n')
+                        lineptr[strlen(lineptr)-1]='\0';
 
                 /*
                  * Get the first word in the line: it has to be either "gain" or "noise"
@@ -964,7 +1056,7 @@ void read_input_file(const char* path){
                          * Get the next token
                          */
 
-                        char* token=strtok(lineptr,"\t");
+                        char* token=strtok(NULL,"\t");
 
                         /*
                          * Check if valid: if not, abort simulation
@@ -980,7 +1072,7 @@ void read_input_file(const char* path){
                          * Store token
                          */
 
-                        sscanf(token,"%lf",&tokens[index]);
+                        tokens[index]=token;
 
                         /*
                          * Increment the index
@@ -993,13 +1085,13 @@ void read_input_file(const char* path){
                  * Depending on the type of line, fill different lists
                  */
 
-                if(strcmp(line_type,"gain")){
+                if(!strcmp(line_type,"gain")){
 
                         /*
                          * The current line describes the gain of a link
                          */
 
-                        add_gain_entry((unsigned  int)tokens[0],(unsigned  int)tokens[1],tokens[2]);
+                        parse_gain_entry(tokens);
                 }
                 else{
 
@@ -1007,7 +1099,7 @@ void read_input_file(const char* path){
                          * The current line describes the noise of a node
                          */
 
-                        add_noise_entry((unsigned  int)tokens[0],tokens[1],tokens[2]);
+                        parse_noise_entry(tokens);
                 }
 
                 /*
@@ -1060,8 +1152,6 @@ void parse_simulation_parameters(void* event_content) {
                 failure_lambda=GetParameterDouble(event_content,"failure_lambda");
         if(IsParameterPresent(event_content, "failure_threshold"))
                 failure_lambda=GetParameterDouble(event_content,"failure_threshold");
-        if(IsParameterPresent(event_content, "ticks_per_sec"))
-                ticks_per_sec=(unsigned long long)GetParameterInt(event_content,"ticks_per_sec");
         if(IsParameterPresent(event_content, "max_simulation_time"))
                 max_simulation_time=(unsigned long long)GetParameterInt(event_content,"max_simulation_time");
         if(IsParameterPresent(event_content, "collected_packets_goal"))
