@@ -428,9 +428,10 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 send_beacon(state);
 
                                 /*
-                                 * The interval of the timer that schedules the sending of beacons is continuously changing, in
-                                 * such a way that beacons are sent with decreasing frequency => schedule an update of the
-                                 * timer, i.e. advance in the virtual time until the moment when the timer has to be updated
+                                 * The interval of the timer that schedules the sending of beacons is continuously
+                                 * changing, in such a way that beacons are sent with decreasing frequency => schedule
+                                 * an update of the timer, i.e. advance in the virtual time until the moment when the
+                                 * timer has to be updated
                                  */
 
                                 schedule_beacons_interval_update(state);
@@ -611,6 +612,20 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         new_pending_transmission(state,((ctp_routing_packet*)event_content)->link_frame.gain,
                                                  CTP_BEACON,event_content,
                                                  ((ctp_routing_packet*)event_content)->link_frame.duration);
+                        break;
+
+                case DATA_PACKET_TRANSMISSION_STARTED:
+
+                        /*
+                         * There's a new incoming frame destined to the current node => determine if the node is
+                         * capable of receiving the frame. Even though this is not the case, keep track of the
+                         * associated transmission because it's sensed by the radio transceiver of the node and it may
+                         * interfere with other frames transmissions.
+                         */
+
+                        new_pending_transmission(state,((ctp_data_packet*)event_content)->link_frame.gain,
+                                                 CTP_DATA_PACKET,event_content,
+                                                 ((ctp_data_packet*)event_content)->link_frame.duration);
 
                         break;
 
@@ -710,7 +725,9 @@ bool OnGVT(unsigned int me, void*snapshot) {
                  * If the value of virtual time is beyond the limit, stop the simulation
                  */
 
-                if(((int)(((node_state*)snapshot)->lvt)%max_simulation_time==0) &&( ((node_state*)snapshot)->lvt>1)){
+                //TODO check this condition
+                //if(((int)(((node_state*)snapshot)->lvt)%max_simulation_time==0) &&( ((node_state*)snapshot)->lvt>1)){
+                if(((((node_state*)snapshot)->lvt)>1.5) &&( ((node_state*)snapshot)->lvt>1)){
                         printf("\n\nSimulation stopped because reached the limit of time:%f\n"
                                        "Packets collected by root:%lu\n"
                                 ,((node_state*)snapshot)->lvt,collected_packets);

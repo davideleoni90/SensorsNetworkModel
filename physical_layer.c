@@ -398,6 +398,12 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
         unsigned int pending_transmissions_count=0;
 
         /*
+         * Source of the frame
+         */
+
+        unsigned int source;
+
+        /*
          * Check if the node is running: if not, it will not receive the frame transmitted
          */
 
@@ -482,6 +488,12 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
 
         new_pending_transmission=create_pending_transmission(type,frame,gain);
 
+        if(type==CTP_BEACON){
+                source=((ctp_routing_packet*)(new_pending_transmission->frame))->link_frame.src;
+                printf("Source of the beacon in the transmission object:%d",source);
+                fflush(stdout);
+        }
+
         /*
          * Check if there are other pending transmissions
          */
@@ -538,6 +550,12 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          */
 
         unsigned char type;
+
+        /*
+         * Source of the transmission
+         */
+
+        unsigned int source;
 
         /*
          * In time between the beginning and the end of this transmission, new frames may have been sent to the node and
@@ -617,7 +635,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          * transmission will be missed by the node too
          */
 
-        if(finished_transmission->power-csma_sensitivity<state->pending_transmissions_power)
+        if(finished_transmission->power-csma_sensitivity<compute_signal_strength(state))
                 finished_transmission->lost=true;
 
         /*
@@ -635,6 +653,12 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                 /*
                  * Inform the LINK LAYER or the FORWARDING ENGINE about the reception
                  */
+
+                if(type==CTP_BEACON){
+                        source=((ctp_routing_packet*)finished_transmission->frame)->link_frame.src;
+                        printf("Node %d received beacon from %d\n",state->me,source);
+                        fflush(stdout);
+                }
 
                 frame_received(state,finished_transmission->frame,type);
 
@@ -774,6 +798,9 @@ void transmit_frame(node_state* state,unsigned char type){
                          */
 
                         ((ctp_routing_packet*)state->radio_outgoing)->link_frame.gain=gain;
+                        printf("Src of beacon:%d\n",((ctp_routing_packet*)state->radio_outgoing)->link_frame.src);
+                        printf("Sink of beacon:%d\n",((ctp_routing_packet*)state->radio_outgoing)->link_frame.sink);
+                        fflush(stdout);
 
                         /*
                          * Schedule a new event destined to the sink node of the link, containing the frame being

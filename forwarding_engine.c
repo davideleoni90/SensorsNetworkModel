@@ -1055,6 +1055,9 @@ void received_data_packet(void* message,node_state* state) {
                  * that are read in order to decide whether the simulation has come to and end or not
                  */
 
+                printf("root received packet from %d with payload %d\n",
+                       packet->data_packet_frame.origin,packet->payload);
+                fflush(stdout);
                 collected_data_packet(packet);
         }
         else{
@@ -1062,7 +1065,9 @@ void received_data_packet(void* message,node_state* state) {
                 /*
                  * Forward the data packet frame of the packet received
                  */
-
+                printf("node %d received packet from %d with payload %d\n",state->me,
+                       packet->data_packet_frame.origin,packet->payload);
+                fflush(stdout);
                 forward_data_packet(packet,state);
         }
 }

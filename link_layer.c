@@ -354,10 +354,15 @@ void start_frame_transmission(node_state* state){
          * and on the number of bytes of the acknowledgment frame (if it has to be sent) => it is generally referred to
          * as transmission delay; the propagation delay, i.e. the time it takes for the electromagnetic wave associated
          * to the signal to reach the recipient is negligible with respect to the transmission delay, so it is ignored.
-         * First get the length of the payload in bits (sizeof returns the length in bytes and 1 byte=8 bits)
+         * First get the length of the payload in bits (sizeof returns the length in bytes and 1 byte=8 bits): this
+         * depends on the size of the content of the frame, either a beacon or a data packet
          */
 
-        double bits_length=sizeof(state->link_layer_outgoing)*8;
+        double bits_length;
+        if(type==CTP_BEACON)
+                bits_length=sizeof(ctp_routing_packet)*8;
+        else
+                bits_length=sizeof(ctp_data_packet)*8;
 
         /*
          * Then set the duration of the transmission to the number of symbols in the frame
@@ -568,6 +573,8 @@ void frame_received(node_state* state,void* frame, unsigned char type){
                  * The frame contains a beacon => pass it to the LINK ESTIMATOR
                  */
 
+                printf("Node %d received beacon from %d\n",state->me,((ctp_routing_packet*)frame)->link_frame.src);
+                fflush(stdout);
                 receive_routing_packet(frame,state);
 
         }

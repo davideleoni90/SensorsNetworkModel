@@ -44,11 +44,11 @@ typedef struct _ctp_data_packet ctp_data_packet;
  */
 
 #ifndef NO_ROUTE_OFFSET
-#define NO_ROUTE_OFFSET 10
+#define NO_ROUTE_OFFSET 0.00010
 #endif
 
 #ifndef SEND_PACKET_TIMER
-#define SEND_PACKET_TIMER 10 // Period of the timer that triggers the sending of a new data packet (in seconds)
+#define SEND_PACKET_TIMER 0.00010 // Period of the timer that triggers the sending of a new data packet (in seconds)
 #endif
 
 #ifndef MIN_PAYLOAD

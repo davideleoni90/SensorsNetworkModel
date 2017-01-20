@@ -18,7 +18,7 @@ typedef struct _route_info route_info;
 #endif
 
 #ifndef UPDATE_ROUTE_TIMER
-#define UPDATE_ROUTE_TIMER 8 // After such interval of time, the route of the node is (re)computed (in seconds)
+#define UPDATE_ROUTE_TIMER 0.008 // After such interval of time, the route of the node is (re)computed (in seconds)
 #endif
 
 #ifndef INVALID_ADDRESS
