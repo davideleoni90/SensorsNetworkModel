@@ -30,8 +30,7 @@ enum{
         CHECK_CHANNEL_FREE=8, // The link layer has to check whether the channel is free
         START_FRAME_TRANSMISSION=9, // The link layer starts to transmit a frame over the channel
         FRAME_TRANSMITTED=10, // The frame has been transmitted
-        BEACON_TRANSMISSION_STARTED=11, // The transmission of a new frame containing a beacon has started
-        DATA_PACKET_TRANSMISSION_STARTED=12, // The transmission of a new frame containing a beacon has started
+        TRANSMISSION_STARTED=11, // The transmission of a new frame has started
         TRANSMISSION_FINISHED=13, // The transmission of a new frame has finished
 };
 
@@ -219,20 +218,54 @@ typedef struct _noise_entry{
 }noise_entry;
 
 /*
+ * PENDING TRANSMISSION FRAME
+ *
+ * A pending transmission is referred to both beacons and data packets => a union is used to represent the payload of
+ * a transmission
+ */
+
+union transmission_frame{
+        ctp_data_packet data_packet;
+        ctp_routing_packet routing_packet;
+};
+
+
+/*
  * PENDING TRANSMISSION
  *
  * Data structure representing the transmission of a frame.
  * More than one frame may be sent to a node at the same time, but it will receive only the one associated with the
- * strongest signal, given that the strength is greater than the noise affecting the node
+ * strongest signal, given that the strength is greater than the noise affecting the node.
  */
 
 typedef struct _pending_transmission{
-        void* frame; // Pointer to the frame carried by the signal
+
+        /*
+         * The frame carried by the transmission: it's either "ctp_data_packet" or "ctp_routing_packet"
+         */
+
+        union transmission_frame frame;
         unsigned char frame_type; // The type of the frame, either CTP_BEACON or CTO_DATA_PACKET
         double power; // The strength of the transmission
         bool lost; // Boolean value set to true in case a stronger transmission comes and hides the current one
         struct _pending_transmission* next; // Pointer to the next element in the list of pending transmissions
 }pending_transmission;
+
+/*
+ * STATISTICS
+ *
+ * This data structure is used to track some useful pieces of information about a node that can be used to better
+ * understand how the network behaves
+ */
+
+typedef struct _node_statistics{
+        unsigned long beacons_received; // The number of beacons received by the node
+        unsigned long data_packets_received; // The number of data packets received by the node
+        unsigned long beacons_sent; // The number of beacons sent by the node
+        unsigned long data_packets_sent; // The number of data packets sent by the node
+        unsigned long data_packets_acked; // The number of data packets sent by the node that have been acked
+        unsigned long collected_packets; // The number of packets sent by the node and collected by the root
+}node_statistics;
 
 /*
  * NODE STATE
@@ -250,7 +283,7 @@ typedef struct _node_state{
         /*
          * PENDING TRANSMISSIONS
          *
-         * This is the pointer to the first element of a list that keeps track of all the incoming frame transmissions.
+         * This is the pointer to the first element of a list that keeps track of all the incoming transmissions
          */
 
         pending_transmission* pending_transmissions;

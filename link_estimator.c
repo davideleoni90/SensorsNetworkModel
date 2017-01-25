@@ -1096,7 +1096,7 @@ void update_ingoing_quality(unsigned int neighbor,link_estimator_table_entry* li
                                  * field of the entry
                                  */
 
-                                entry->ingoing_quality=(ALPHA*entry->ingoing_quality+(10-ALPHA)*new_ingoing_quality)/10;
+                                entry->ingoing_quality=(alpha*entry->ingoing_quality+(10-alpha)*new_ingoing_quality)/10;
 
                                 /*
                                  * Reset counters for received and missed beacons

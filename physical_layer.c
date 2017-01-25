@@ -41,7 +41,7 @@ extern unsigned int csma_sensitivity;
  * INPUT FILE.
  */
 
-gain_entry** gains_list;
+gain_entry** gains_list=NULL;
 
 /*
  * NOISE FLOOR LIST
@@ -52,7 +52,7 @@ gain_entry** gains_list;
  * is read from the input file, together with the value of the noise floor.
  */
 
-noise_entry* noise_list;
+noise_entry* noise_list=NULL;
 
 extern FILE* file;
 
@@ -91,7 +91,7 @@ void init_physical_layer(node_state* state){
         state->pending_transmissions_power=0;
 
         /*
-         * Set the list containing pendind transmissions to NULL
+         * Set the list containing pending transmissions to NULL
          */
 
         state->pending_transmissions=NULL;
@@ -102,7 +102,6 @@ void init_physical_layer(node_state* state){
  *
  * Create a new instance of type "pending_transmission" to keep track of a new pending transmission
  *
- * @state: pointer to the object representing the current state of the node
  * @type: byte telling whether the frame contains a beacon or a data packet
  * @frame: pointer to the frame carried by the signal
  * @power: power of the signal
@@ -131,25 +130,59 @@ pending_transmission* create_pending_transmission(unsigned char type,void* frame
         if(type==CTP_BEACON){
 
                 /*
+                 * Parse the frame into a beacon
+                 */
+
+                ctp_routing_packet* beacon=(ctp_routing_packet*)frame;
+
+                /*
                  * The frame contains a beacon => set the type
                  */
 
                 new_transmission->frame_type=CTP_BEACON;
+
+                /*
+                 * Copy the beacon into the transmission object, field by field
+                 */
+
+                new_transmission->frame.routing_packet.link_frame.duration=beacon->link_frame.duration;
+                new_transmission->frame.routing_packet.link_frame.gain=beacon->link_frame.gain;
+                new_transmission->frame.routing_packet.link_frame.sink=beacon->link_frame.sink;
+                new_transmission->frame.routing_packet.link_frame.src=beacon->link_frame.src;
+                new_transmission->frame.routing_packet.link_estimator_frame.seq=beacon->link_estimator_frame.seq;
+                new_transmission->frame.routing_packet.routing_frame.ETX=beacon->routing_frame.ETX;
+                new_transmission->frame.routing_packet.routing_frame.options=beacon->routing_frame.options;
+                new_transmission->frame.routing_packet.routing_frame.parent=beacon->routing_frame.parent;
         }
         else{
+
+                /*
+                 * Parse the frame into a data packet
+                 */
+
+                ctp_data_packet* data_packet=(ctp_data_packet*)frame;
 
                 /*
                  * The frame contains a data packet => set the type
                  */
 
                 new_transmission->frame_type=CTP_DATA_PACKET;
+
+                /*
+                 * Copy the data packet into the transmission object, field by field
+                 */
+
+                new_transmission->frame.data_packet.link_frame.sink=data_packet->link_frame.sink;
+                new_transmission->frame.data_packet.link_frame.src=data_packet->link_frame.src;
+                new_transmission->frame.data_packet.link_frame.duration=data_packet->link_frame.duration;
+                new_transmission->frame.data_packet.link_frame.gain=data_packet->link_frame.gain;
+                new_transmission->frame.data_packet.payload=data_packet->payload;
+                new_transmission->frame.data_packet.data_packet_frame.ETX=data_packet->data_packet_frame.ETX;
+                new_transmission->frame.data_packet.data_packet_frame.options=data_packet->data_packet_frame.options;
+                new_transmission->frame.data_packet.data_packet_frame.origin=data_packet->data_packet_frame.origin;
+                new_transmission->frame.data_packet.data_packet_frame.seqNo=data_packet->data_packet_frame.seqNo;
+                new_transmission->frame.data_packet.data_packet_frame.THL=data_packet->data_packet_frame.THL;
         }
-
-        /*
-         * Set the frame associated with the transmission
-         */
-
-        new_transmission->frame=frame;
 
         /*
          * The transmission has not been lost yet
@@ -328,9 +361,7 @@ void add_noise_entry(unsigned int node, double noise_floor, double white_noise){
  */
 
 bool compare_pending_transmissions(pending_transmission*a,pending_transmission*b){
-        if(a->frame==b->frame && a->power==b->power && a->frame_type==b->frame_type)
-                return true;
-        return false;
+        return a==b;
 }
 
 /*
@@ -365,7 +396,7 @@ void send_ack(node_state* state,ctp_data_packet* packet){
 /*
  * NEW PENDING TRANSMISSION
  *
- * Helper function for the events of type BEACON_TRANSMISSION_STARTED and DATA_PACKET_TRANSMISSION STARTED.
+ * Helper function for the event of type TRANSMISSION_STARTED
  * It is in charge of creating a new entry for the new pending transmission in the dedicated list of the node state;
  * also it has to check whether the transmission will be received by the node or not, depending on the actual strength
  * of the interferences created by other signals
@@ -377,7 +408,7 @@ void send_ack(node_state* state,ctp_data_packet* packet){
  * @duration: duration of the new transmission
  */
 
-void new_pending_transmission(node_state* state, double gain, unsigned char type,void* frame,double duration){
+void new_pending_transmission(node_state* state, double gain,unsigned char type,void* frame,double duration){
 
         /*
          * Pointer to the new instance of type "pending_transmission" created for the new transmission
@@ -396,12 +427,6 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
          */
 
         unsigned int pending_transmissions_count=0;
-
-        /*
-         * Source of the frame
-         */
-
-        unsigned int source;
 
         /*
          * Check if the node is running: if not, it will not receive the frame transmitted
@@ -447,15 +472,15 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
 
         /*
          * Go through the list of pending transmissions and check whether the current transmission will cause the node
-         * missing some of them because they are too weak w.r.t to the new one
+         * to miss some of them because they are too weak w.r.t to the new one
          */
 
         pending_transmission* current=state->pending_transmissions;
         while(current!=NULL){
 
                 /*
-                 * If the difference between the power of the current transmission and the power of the
-                 * new one is below the threshold, the former is lost
+                 * If the difference between the power of the current transmission and the power of the new one is below
+                 * the threshold, the former is lost
                  */
 
                 if(current->power-csma_sensitivity<gain)
@@ -483,16 +508,10 @@ void new_pending_transmission(node_state* state, double gain, unsigned char type
         state->pending_transmissions_power+=pow(10.0, gain / 10.0);
 
         /*
-         * Create an entry for the the new pending transmissions
+         * Create an entry for the the new pending transmission
          */
 
         new_pending_transmission=create_pending_transmission(type,frame,gain);
-
-        if(type==CTP_BEACON){
-                source=((ctp_routing_packet*)(new_pending_transmission->frame))->link_frame.src;
-                printf("Source of the beacon in the transmission object:%d",source);
-                fflush(stdout);
-        }
 
         /*
          * Check if there are other pending transmissions
@@ -552,12 +571,6 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
         unsigned char type;
 
         /*
-         * Source of the transmission
-         */
-
-        unsigned int source;
-
-        /*
          * In time between the beginning and the end of this transmission, new frames may have been sent to the node and
          * so there may be further pending transmissions whose power is not strong enough compared to the current
          * transmission => they will be missed by the node
@@ -580,7 +593,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                  */
 
                 if(current_transmission->next &&
-                        compare_pending_transmissions(current_transmission->next,finished_transmission)) {
+                   compare_pending_transmissions(current_transmission->next,finished_transmission)) {
 
                         /*
                          * Found the predecessor
@@ -635,8 +648,9 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          * transmission will be missed by the node too
          */
 
-        if(finished_transmission->power-csma_sensitivity<compute_signal_strength(state))
-                finished_transmission->lost=true;
+        if(finished_transmission->power-csma_sensitivity<compute_signal_strength(state)) {
+                finished_transmission->lost = true;
+        }
 
         /*
          * If the frame has been received by the node, it has to be processed
@@ -651,31 +665,33 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                 type=finished_transmission->frame_type;
 
                 /*
-                 * Inform the LINK LAYER or the FORWARDING ENGINE about the reception
+                 * Inform the LINK ESTIMATOR or the FORWARDING ENGINE about the reception: check the type to determine if
+                 * the frame contains a beacon or a data packet
                  */
 
-                if(type==CTP_BEACON){
-                        source=((ctp_routing_packet*)finished_transmission->frame)->link_frame.src;
-                        printf("Node %d received beacon from %d\n",state->me,source);
-                        fflush(stdout);
+                if(type==CTP_BEACON) {
+                        frame_received(state, &finished_transmission->frame.routing_packet, type);
                 }
+                else{
 
-                frame_received(state,finished_transmission->frame,type);
+                        /*
+                         * Inform the forwarding engine that a frame has been received
+                         */
 
-                /*
-                 * If the frame contains a data packet, the sender is waiting for an acknowledgment by the intended
-                 * recipient => if this node is the recipient and it is not busy transmitting another frame, it has to
-                 * send the acknowledgment to the recipient.
-                 * First get the recipient, as indicated in the link layer frame
-                 */
+                        frame_received(state, &finished_transmission->frame.data_packet, type);
 
-                if(type==CTP_DATA_PACKET) {
+                        /*
+                         * If the frame contains a data packet, the sender is waiting for an acknowledgment by the
+                         * intended recipient => if this node is the recipient and it is not busy transmitting another
+                         * frame, it has to send the acknowledgment to the recipient.
+                         * First get the recipient, as indicated in the link layer frame
+                         */
 
                         /*
                          * The frame contains a data packet => extract the link layer frame from the packet
                          */
 
-                        link_layer_frame *link_frame = &((ctp_data_packet *) finished_transmission->frame)->link_frame;
+                        link_layer_frame *link_frame = &finished_transmission->frame.data_packet.link_frame;
 
                         /*
                          * Get the intended recipient
@@ -688,7 +704,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                          */
 
                         if(recipient==state->me && !state->link_layer_transmitting)
-                                send_ack(state,(ctp_data_packet*)finished_transmission->frame);
+                                send_ack(state,&finished_transmission->frame.data_packet);
                 }
         }
 
@@ -798,16 +814,13 @@ void transmit_frame(node_state* state,unsigned char type){
                          */
 
                         ((ctp_routing_packet*)state->radio_outgoing)->link_frame.gain=gain;
-                        printf("Src of beacon:%d\n",((ctp_routing_packet*)state->radio_outgoing)->link_frame.src);
-                        printf("Sink of beacon:%d\n",((ctp_routing_packet*)state->radio_outgoing)->link_frame.sink);
-                        fflush(stdout);
 
                         /*
                          * Schedule a new event destined to the sink node of the link, containing the frame being
                          * transmitted
                          */
 
-                        ScheduleNewEvent(sink,state->lvt,BEACON_TRANSMISSION_STARTED,state->radio_outgoing,
+                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_STARTED,state->radio_outgoing,
                                          sizeof(ctp_routing_packet));
 
                 }
@@ -824,7 +837,7 @@ void transmit_frame(node_state* state,unsigned char type){
                          * transmitted
                          */
 
-                        ScheduleNewEvent(sink,state->lvt,DATA_PACKET_TRANSMISSION_STARTED,state->radio_outgoing,
+                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_STARTED,state->radio_outgoing,
                                          sizeof(ctp_data_packet));
                 }
 

@@ -50,6 +50,8 @@ unsigned int max_payload=MAX_PAYLOAD;
 
 /* GLOBAL VARIABLES - end */
 
+extern node_statistics* node_statistics_list;
+
 /*
  * PARSE SIMULATION PARAMETERS FOR THE FOWARDING ENGINE
  */
@@ -567,9 +569,9 @@ void schedule_retransmission(node_state* state){
          */
 
         double interval=RandomRange((unsigned int)(data_packet_transmission_delta*1000),
-                                    (unsigned int)((data_packet_transmission_delta+
-                                            data_packet_transmission_offset-1)*1000));
-        wait_until(state->me,state->lvt+interval,RETRANSMITT_DATA_PACKET);
+                                    (unsigned int)(((data_packet_transmission_delta+
+                                            data_packet_transmission_offset)*1000)-1));
+        wait_until(state->me,state->lvt+(interval/1000),RETRANSMITT_DATA_PACKET);
 }
 
 /*
@@ -641,7 +643,7 @@ void start_forwarding_engine(node_state* state){
                  * The simulator is in charge of re-setting the timer every time it is fired
                  */
 
-                wait_until(state->me,state->lvt+SEND_PACKET_TIMER,SEND_PACKET_TIMER_FIRED);
+                wait_until(state->me,state->lvt+send_packet_timer,SEND_PACKET_TIMER_FIRED);
 }
 
 /*
@@ -811,12 +813,9 @@ bool send_data_packet(node_state* state) {
          */
 
         submitted=send_frame(state,parent,CTP_DATA_PACKET);
-        printf("Node %d is sending packet with payload %d to node %d\n",state->me,first_entry->packet.payload,
-               first_entry->packet.link_frame.sink);
-        fflush(stdout);
 
         /*
-         * If the packet has been successfully sumbitted, set the flag SENDING
+         * If the packet has been successfully submitted, set the flag SENDING
          */
 
         if(submitted)
@@ -993,6 +992,12 @@ void create_data_packet(node_state* state){
 void received_data_packet(void* message,node_state* state) {
 
         /*
+         * Update statistics about data packets received (and acked) by the node
+         */
+
+        node_statistics_list[state->me].data_packets_received+=1;
+
+        /*
          * Parse the buffer received to a data packet
          */
 
@@ -1055,9 +1060,7 @@ void received_data_packet(void* message,node_state* state) {
                  * that are read in order to decide whether the simulation has come to and end or not
                  */
 
-                printf("root received packet from %d with payload %d\n",
-                       packet->data_packet_frame.origin,packet->payload);
-                fflush(stdout);
+
                 collected_data_packet(packet);
         }
         else{
@@ -1065,9 +1068,7 @@ void received_data_packet(void* message,node_state* state) {
                 /*
                  * Forward the data packet frame of the packet received
                  */
-                printf("node %d received packet from %d with payload %d\n",state->me,
-                       packet->data_packet_frame.origin,packet->payload);
-                fflush(stdout);
+
                 forward_data_packet(packet,state);
         }
 }
@@ -1231,6 +1232,13 @@ void transmitted_data_packet(node_state* state,bool result) {
                 ctp_data_packet *head = &head_entry->packet;
 
                 /*
+                 * Update statistics about data packets sent by the node
+                 */
+
+                node_statistics_list[state->me].data_packets_sent+=1;
+
+
+                /*
                  * The packet has been successfully transmitted => check if it has been acked, i.e if the packet at
                  * the head of the output queue is the last acknowledged
                  */
@@ -1279,6 +1287,12 @@ void transmitted_data_packet(node_state* state,bool result) {
 
                                 state->sending_data_packet=false;
                         }
+
+                        /*
+                         * Update statistics about data packets sent by the node that have been acked
+                         */
+
+                        node_statistics_list[state->me].data_packets_acked+=1;
                 }
                 else{
 

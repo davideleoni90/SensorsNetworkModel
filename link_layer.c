@@ -56,6 +56,8 @@ double csma_sensitivity=CSMA_SENSITIVITY;
 
 /* GLOBAL VARIABLES - end */
 
+extern node_statistics* node_statistics_list;
+
 /*
  * PARSE SIMULATION PARAMETERS FOR THE LINK LAYER
  */
@@ -530,6 +532,12 @@ void frame_transmitted(node_state* state){
                  */
 
                 state->sending_beacon=false;
+
+                /*
+                 * Update statistics about beacons sent by the node
+                 */
+
+                node_statistics_list[state->me].beacons_sent+=1;
         }
         else{
 
@@ -573,8 +581,6 @@ void frame_received(node_state* state,void* frame, unsigned char type){
                  * The frame contains a beacon => pass it to the LINK ESTIMATOR
                  */
 
-                printf("Node %d received beacon from %d\n",state->me,((ctp_routing_packet*)frame)->link_frame.src);
-                fflush(stdout);
                 receive_routing_packet(frame,state);
 
         }

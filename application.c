@@ -14,10 +14,11 @@ unsigned long collected_packets_goal=COLLECTED_DATA_PACKETS_GOAL;
 unsigned long max_simulation_time=MAX_TIME;
 
 /*
- * The vector containing a counter of packets received by the root of the collection tree from the other nodes
+ * The vector containing the statistics for each node of the network, including packets sent by each node that have
+ * been received by the root
  */
 
-unsigned int* collected_packets_list;
+node_statistics* node_statistics_list;
 FILE* file; // Pointer to the file object associated to the configuration file
 
 /*
@@ -55,10 +56,10 @@ double failure_lambda=0.0005;
 
 double failure_threshold=0.9;
 
-extern gain_entry* gains_list;
+extern gain_entry** gains_list;
 extern noise_entry* noise_list;
-extern unsigned int update_route_timer;
-extern unsigned int send_packet_timer;
+extern double update_route_timer;
+extern double send_packet_timer;
 
 /* GLOBAL VARIABLES (shared among all logical processes) - end */
 
@@ -88,6 +89,12 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
          */
 
         unsigned int i;
+
+        /*
+         * Pointer to the a pending transmission
+         */
+
+        pending_transmission* current=NULL;
 
         /*
          * Initialize the local pointer to the pointer provided by the simulator
@@ -280,16 +287,16 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 state->root=true;
 
                                 /*
-                                 * Allocate the array for counters of packets received by the root from the nodes
+                                 * Allocate the array for statistics about nodes
                                  */
 
-                                collected_packets_list=malloc(sizeof(unsigned int)*n_prc_tot);
+                                node_statistics_list=malloc(sizeof(node_statistics)*n_prc_tot);
 
                                 /*
-                                 * Initialize counters to 0
+                                 * Initialize elements to 0
                                  */
 
-                                bzero(collected_packets_list,sizeof(unsigned int)*n_prc_tot);
+                                bzero(node_statistics_list,sizeof(node_statistics)*n_prc_tot);
 
                                 /*
                                  * All the parameters of the configuration have been parsed => tell all the processes
@@ -600,33 +607,29 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                  *
                  */
 
-                case BEACON_TRANSMISSION_STARTED:
+                case TRANSMISSION_STARTED:
 
                         /*
                          * There's a new incoming frame destined to the current node => determine if the node is
                          * capable of receiving the frame. Even though this is not the case, keep track of the
                          * associated transmission because it's sensed by the radio transceiver of the node and it may
-                         * interfere with other frames transmissions.
+                         * interfere with other the transmission of pther frames.
                          */
-
-                        new_pending_transmission(state,((ctp_routing_packet*)event_content)->link_frame.gain,
-                                                 CTP_BEACON,event_content,
-                                                 ((ctp_routing_packet*)event_content)->link_frame.duration);
-                        break;
-
-                case DATA_PACKET_TRANSMISSION_STARTED:
 
                         /*
-                         * There's a new incoming frame destined to the current node => determine if the node is
-                         * capable of receiving the frame. Even though this is not the case, keep track of the
-                         * associated transmission because it's sensed by the radio transceiver of the node and it may
-                         * interfere with other frames transmissions.
+                         * Determine the content of the frame (either a beacon or a data packet)
                          */
 
-                        new_pending_transmission(state,((ctp_data_packet*)event_content)->link_frame.gain,
-                                                 CTP_DATA_PACKET,event_content,
-                                                 ((ctp_data_packet*)event_content)->link_frame.duration);
-
+                        if(size==sizeof(ctp_routing_packet)){
+                                new_pending_transmission(state,((ctp_routing_packet*)event_content)->link_frame.gain,
+                                                         CTP_BEACON,event_content,
+                                                         ((ctp_routing_packet*)event_content)->link_frame.duration);
+                        }
+                        else{
+                                new_pending_transmission(state,((ctp_data_packet*)event_content)->link_frame.gain,
+                                                         CTP_DATA_PACKET,event_content,
+                                                         ((ctp_data_packet*)event_content)->link_frame.duration);
+                        }
                         break;
 
                 case TRANSMISSION_FINISHED:
@@ -726,8 +729,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
                  */
 
                 //TODO check this condition
-                //if(((int)(((node_state*)snapshot)->lvt)%max_simulation_time==0) &&( ((node_state*)snapshot)->lvt>1)){
-                if(((((node_state*)snapshot)->lvt)>1.5) &&( ((node_state*)snapshot)->lvt>1)){
+                if(((int)(((node_state*)snapshot)->lvt)>max_simulation_time) &&( ((node_state*)snapshot)->lvt>1)){
                         printf("\n\nSimulation stopped because reached the limit of time:%f\n"
                                        "Packets collected by root:%lu\n"
                                 ,((node_state*)snapshot)->lvt,collected_packets);
@@ -739,7 +741,14 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                          */
 
                                         continue;
-                                printf("Packets from %d:%d\n",i,collected_packets_list[i]);
+                                printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
+                                printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
+                                printf("Beacons sent by %d:%lu\n",i,node_statistics_list[i].beacons_sent);
+                                printf("Data packets received by %d:%lu\n",i,
+                                       node_statistics_list[i].data_packets_received);
+                                printf("Data packets sent by %d:%lu\n",i,node_statistics_list[i].data_packets_sent);
+                                printf("Data packets sent (and acked) by %d:%lu\n",i,node_statistics_list[i].data_packets_acked);
+                                printf("\n***************\n");
                         }
                         fflush(stdout);
                         return true;
@@ -760,7 +769,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                          */
 
                                         continue;
-                                printf("Packets from %d:%d\n",i,collected_packets_list[i]);
+                                printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
                         }
 
                         /*
@@ -786,7 +795,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                  */
 
                                 continue;
-                        if (collected_packets_list[i] <collected_packets_goal) {
+                        if (node_statistics_list[i].collected_packets <collected_packets_goal) {
                                 fflush(stdout);
                                 return false;
                         }
@@ -808,7 +817,7 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                  */
 
                                 continue;
-                        printf("Packets from %d:%d\n",i,collected_packets_list[i]);
+                        printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
                 }
                 fflush(stdout);
                 return true;
@@ -969,12 +978,6 @@ void read_input_file(const char* path){
         unsigned int lines=0;
 
         /*
-         * Index variable
-         */
-
-        unsigned int i;
-
-        /*
          * Parameters required only by the function "getline": if "lineptr" is set to NULL before the call and "len" is
          * set to 0, getline allocates a buffer for storing the line
          */
@@ -1007,11 +1010,10 @@ void read_input_file(const char* path){
         gains_list=malloc(sizeof(gain_entry*)*n_prc_tot);
 
         /*
-         * Initialize pointers to null
+         * Initialize allocated area of memory
          */
 
-        //for(i=0;i<n_prc_tot;i++)
-                //gains_list[i]=NULL;
+        bzero(gains_list,sizeof(gain_entry*)*n_prc_tot);
 
         /*
          * Allocates an array containing an instance of type "noise_entry" for each node: this will be initialized to
@@ -1020,6 +1022,12 @@ void read_input_file(const char* path){
          */
 
         noise_list=malloc(sizeof(noise_entry)*n_prc_tot);
+
+        /*
+         * Initialize allocated area of memory
+         */
+
+        bzero(noise_list,sizeof(noise_entry)*n_prc_tot);
 
         /*
          * Now read the file line by line and store the values for gain and noise in the corresponding lists
@@ -1278,7 +1286,7 @@ bool is_failed(simtime_t now){
 void collected_data_packet(ctp_data_packet* packet){
         collected_packets++;
         if(packet->data_packet_frame.origin)
-                collected_packets_list[packet->data_packet_frame.origin]+=1;
+                node_statistics_list[packet->data_packet_frame.origin].collected_packets+=1;
 }
 
 /* SIMULATION FUNCTIONS - end */

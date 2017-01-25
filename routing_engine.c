@@ -35,6 +35,8 @@ double max_beacons_send_interval=MAX_BEACONS_SEND_INTERVAL;
 
 /* GLOBAL VARIABLES - end */
 
+extern node_statistics* node_statistics_list;
+
 /*
  * PARSE SIMULATION PARAMETERS FOR THE ROUTING ENGINE
  */
@@ -87,7 +89,7 @@ void start_routing_engine(node_state* state){
          * At first set the beacon sending interval to the minimum possible value
          */
 
-        state->current_interval=MIN_BEACONS_SEND_INTERVAL;
+        state->current_interval=min_beacons_send_interval;
 
         /*
          * Set the number of valid entries in the ROUTING TABLE to 0
@@ -361,7 +363,7 @@ void update_routing_table(unsigned int from, unsigned int parent, unsigned short
                  * sender, but only if the quality of the link to him is beyond a threshold (1-hop ETX<MAX_ONE_HOP_ETX)
                  */
 
-                if(one_hop_etx<MAX_ONE_HOP_ETX){
+                if(one_hop_etx<max_one_hop_etx){
 
                         /*
                          * The quality of the link to the sender passed the check => initialize the first free entry of
@@ -1009,6 +1011,12 @@ void receive_beacon(ctp_routing_frame* routing_frame, unsigned int from,node_sta
 
         if(routing_frame->options & CTP_PULL)
                 reset_beacon_interval(state);
+
+        /*
+         * Update statistics about beacons received by the node
+         */
+
+        node_statistics_list[state->me].beacons_received+=1;
 }
 
 /*
