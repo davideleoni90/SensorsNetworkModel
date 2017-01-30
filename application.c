@@ -11,7 +11,7 @@
 
 unsigned long collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
 unsigned long collected_packets_goal=COLLECTED_DATA_PACKETS_GOAL;
-unsigned long max_simulation_time=MAX_TIME;
+double max_simulation_time=MAX_TIME;
 
 /*
  * The vector containing the statistics for each node of the network, including packets sent by each node that have
@@ -20,13 +20,6 @@ unsigned long max_simulation_time=MAX_TIME;
 
 node_statistics* node_statistics_list;
 FILE* file; // Pointer to the file object associated to the configuration file
-
-/*
- * The packets collected within an interval of 100 instants of time are printed; in particular, they are printed at
- * virtual time 100*time_factor, where time_factor is incremented after every printing
- */
-
-unsigned char time_factor=1;
 
 /*
  * ID of the node chosen as root of the collection tree => all the data packets will (hopefully) be collected by this
@@ -60,6 +53,7 @@ extern gain_entry** gains_list;
 extern noise_entry* noise_list;
 extern double update_route_timer;
 extern double send_packet_timer;
+extern double create_packet_timer;
 
 /* GLOBAL VARIABLES (shared among all logical processes) - end */
 
@@ -91,12 +85,6 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
         unsigned int i;
 
         /*
-         * Pointer to the a pending transmission
-         */
-
-        pending_transmission* current=NULL;
-
-        /*
          * Initialize the local pointer to the pointer provided by the simulator
          */
 
@@ -106,7 +94,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
          * Check whether the state object has already been set: if so, update the the local virtual time
          */
 
-        if(state)
+        if(state!=NULL)
                 state->lvt=now;
 
         /*
@@ -487,20 +475,48 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                         if(state->state&RUNNING) {
 
                                 /*
-                                 * If the node is busy sending a packet keep waiting, otherwise create a new packet and
-                                 * send it to the root node
+                                 * If the node is busy sending a packet keep waiting
                                  */
 
                                 if (!(state->state & SENDING)) {
-                                        create_data_packet(state);
+
+                                        /*
+                                         * The node is not sending any data packet: send the packet in the head of the
+                                         * output queue
+                                         */
+
+                                        send_data_packet(state);
                                 }
 
                                 /*
-                                 * The time simulated through this event is periodic => schedule this event after the same amount
-                                 * of time, starting from now
+                                 * The time simulated through this event is periodic => schedule this event after the
+                                 * same amount of time, starting from now
                                  */
 
                                 wait_until(me, now + send_packet_timer, SEND_PACKET_TIMER_FIRED);
+                        }
+                        break;
+
+                case CREATE_PACKET_TIMER_FIRED:
+
+                        /*
+                         * If the node is not running, do nothing
+                         */
+
+                        if(state->state&RUNNING) {
+
+                                /*
+                                 * Create a new data packet with data sampled from the sensors
+                                 */
+
+                                create_data_packet(state);
+
+                                /*
+                                 * The time simulated through this event is periodic => schedule this event after the
+                                 * same amount of time, starting from now
+                                 */
+
+                                wait_until(me, now + create_packet_timer, CREATE_PACKET_TIMER_FIRED);
                         }
                         break;
 
@@ -585,7 +601,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 
                                 /*
                                  * This event is delivered to a node by itself when the transmission of a frame is over:
-                                 * if the frame contained a data packet, the node has to check whether this hase been
+                                 * if the frame contained a data packet, the node has to check whether this has been
                                  * acknowledged
                                  */
 
@@ -607,29 +623,32 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                  *
                  */
 
-                case TRANSMISSION_STARTED:
+                case TRANSMISSION_BEACON_STARTED:
 
                         /*
-                         * There's a new incoming frame destined to the current node => determine if the node is
-                         * capable of receiving the frame. Even though this is not the case, keep track of the
-                         * associated transmission because it's sensed by the radio transceiver of the node and it may
-                         * interfere with other the transmission of pther frames.
+                         * There's a new incoming frame (containing a beacon) destined to the current node => determine
+                         * if the node is capable of receiving the frame. Even though this is not the case, keep track
+                         * of the associated transmission because it's sensed by the radio transceiver of the node and
+                         * it may interfere with other the transmission of other frames.
                          */
 
-                        /*
-                         * Determine the content of the frame (either a beacon or a data packet)
-                         */
-
-                        if(size==sizeof(ctp_routing_packet)){
-                                new_pending_transmission(state,((ctp_routing_packet*)event_content)->link_frame.gain,
+                        new_pending_transmission(state,((ctp_routing_packet*)event_content)->link_frame.gain,
                                                          CTP_BEACON,event_content,
                                                          ((ctp_routing_packet*)event_content)->link_frame.duration);
-                        }
-                        else{
-                                new_pending_transmission(state,((ctp_data_packet*)event_content)->link_frame.gain,
-                                                         CTP_DATA_PACKET,event_content,
-                                                         ((ctp_data_packet*)event_content)->link_frame.duration);
-                        }
+                        break;
+
+                case TRANSMISSION_DATA_PACKET_STARTED:
+
+                        /*
+                         * There's a new incoming frame (containing a data packet) destined to the current node =>
+                         * determine if the node is capable of receiving the frame. Even though this is not the case,
+                         * keep track of the associated transmission because it's sensed by the radio transceiver of the
+                         * node and it may interfere with other the transmission of other frames.
+                         */
+
+                        new_pending_transmission(state,((ctp_data_packet*)event_content)->link_frame.gain,
+                                                 CTP_DATA_PACKET,event_content,
+                                                 ((ctp_data_packet*)event_content)->link_frame.duration);
                         break;
 
                 case TRANSMISSION_FINISHED:
@@ -704,6 +723,58 @@ bool OnGVT(unsigned int me, void*snapshot) {
         int i=0;
 
         /*
+         * If the value of virtual time is beyond the limit, stop the simulation
+         */
+
+        //TODO remove some print
+        if((((node_state*)snapshot)->lvt>max_simulation_time) &&( ((node_state*)snapshot)->lvt>1.0)){
+                printf("\n\nSimulation stopped because reached the limit of time:%f\n"
+                               "Packets collected by root:%lu\n"
+                        ,((node_state*)snapshot)->lvt,collected_packets);
+                for(i=0;i<n_prc_tot;i++) {
+                        if(i==ctp_root) {
+
+                                /*
+                                 * Root node does not send packets, only collects them
+                                 */
+                                printf("Beacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
+                                printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
+                                continue;
+                        }
+                        printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
+                        printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
+                        printf("Beacons sent by %d:%lu\n",i,node_statistics_list[i].beacons_sent);
+                        printf("Data packets received by %d:%lu\n",i,
+                               node_statistics_list[i].data_packets_received);
+                        printf("Data packets sent by %d:%lu\n",i,node_statistics_list[i].data_packets_sent);
+                        printf("Data packets sent (and acked) by %d:%lu\n",i,node_statistics_list[i].data_packets_acked);
+                        printf("No packet:%lu\n",node_statistics_list[i].stopped_no_packet);
+                        printf("Busy:%lu\n",node_statistics_list[i].stopped_busy);
+                        printf("etx:%lu\n",node_statistics_list[i].stopped_etx);
+                        printf("cache:%lu\n",node_statistics_list[i].stopped_cache);
+                        printf("link:%lu\n",node_statistics_list[i].stopped_link);
+                        printf("passed_etx_check:%lu\n",node_statistics_list[i].passed_etx_check);
+                        printf("valid parent:%u\n",node_statistics_list[i].valid_parent);
+                        printf("lost_beacons:%lu\n",node_statistics_list[i].lost_beacons);
+                        printf("lost_data_packets:%lu\n",node_statistics_list[i].lost_data_packets);
+                        printf("\n***************\n");
+                }
+                fflush(stdout);
+                return true;
+        }
+
+        /*
+         * Then check that there's at least one node running: if not, stop the simulation
+         */
+
+        if(n_prc_tot-failed_nodes<=1) {
+                printf("\n\nSimulation stopped because only one node is still alive at time %f\n"
+                               "Packets collected by root:%lu\n"
+                        ,((node_state*)snapshot)->lvt,collected_packets);
+                return true;
+        }
+
+        /*
          * If the current node is the root of the collection tree, check that there are still some nodes alive and
          * also check the number of data packets received
          */
@@ -714,72 +785,11 @@ bool OnGVT(unsigned int me, void*snapshot) {
                  * First check if the root is still alive: if not, terminate the simulation
                  */
 
-                if(!(((node_state*)snapshot)->state&RUNNING))
-                        return true;
-
-                /*
-                 * Then check that there's at least one node running: if not, stop the simulation
-                 */
-
-                if(n_prc_tot-failed_nodes<=1)
-                        return true;
-
-                /*
-                 * If the value of virtual time is beyond the limit, stop the simulation
-                 */
-
-                //TODO check this condition
-                if(((int)(((node_state*)snapshot)->lvt)>max_simulation_time) &&( ((node_state*)snapshot)->lvt>1)){
-                        printf("\n\nSimulation stopped because reached the limit of time:%f\n"
+                if(!(((node_state*)snapshot)->state&RUNNING)) {
+                        printf("\n\nSimulation stopped because the root node has crashed at time %f\n"
                                        "Packets collected by root:%lu\n"
                                 ,((node_state*)snapshot)->lvt,collected_packets);
-                        for(i=0;i<n_prc_tot;i++) {
-                                if(i==ctp_root)
-
-                                        /*
-                                         * Root node does not send packets, only collects them
-                                         */
-
-                                        continue;
-                                printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
-                                printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
-                                printf("Beacons sent by %d:%lu\n",i,node_statistics_list[i].beacons_sent);
-                                printf("Data packets received by %d:%lu\n",i,
-                                       node_statistics_list[i].data_packets_received);
-                                printf("Data packets sent by %d:%lu\n",i,node_statistics_list[i].data_packets_sent);
-                                printf("Data packets sent (and acked) by %d:%lu\n",i,node_statistics_list[i].data_packets_acked);
-                                printf("\n***************\n");
-                        }
-                        fflush(stdout);
                         return true;
-                }
-
-                /*
-                 * Print the number of packets received by the root from each other node; do this once every 100 instants
-                 * of virtual time
-                 */
-
-                if(((int)(((node_state*)snapshot)->lvt)%(100*time_factor)==0) &&( ((node_state*)snapshot)->lvt>1)){
-                        printf("\n\nChecking packets collected at time %f\n",((node_state*)snapshot)->lvt);
-                        for(i=0;i<n_prc_tot;i++) {
-                                if(i==ctp_root)
-
-                                        /*
-                                         * Root node does not send packets, only collects them
-                                         */
-
-                                        continue;
-                                printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
-                        }
-
-                        /*
-                         * Increment the time factor, otherwise the information about packets collected so far would be
-                         * printed more than once every 100 instants of virtual time (since the simulation time is of
-                         * type "double")
-                         */
-
-                        time_factor++;
-                        printf("\n");
                 }
 
                 /*
@@ -796,7 +806,6 @@ bool OnGVT(unsigned int me, void*snapshot) {
 
                                 continue;
                         if (node_statistics_list[i].collected_packets <collected_packets_goal) {
-                                fflush(stdout);
                                 return false;
                         }
                 }
@@ -1016,7 +1025,7 @@ void read_input_file(const char* path){
         bzero(gains_list,sizeof(gain_entry*)*n_prc_tot);
 
         /*
-         * Allocates an array containing an instance of type "noise_entry" for each node: this will be initialized to
+         * Allocate an array containing an instance of type "noise_entry" for each node: this will be initialized to
          * the values of noise read from the input file; in case no value is specified for a node, the default value of
          * noise is used
          */
@@ -1178,7 +1187,7 @@ void parse_simulation_parameters(void* event_content) {
         if(IsParameterPresent(event_content, "failure_threshold"))
                 failure_lambda=GetParameterDouble(event_content,"failure_threshold");
         if(IsParameterPresent(event_content, "max_simulation_time"))
-                max_simulation_time=(unsigned long long)GetParameterInt(event_content,"max_simulation_time");
+                max_simulation_time = GetParameterDouble(event_content, "max_simulation_time");
         if(IsParameterPresent(event_content, "collected_packets_goal"))
                 collected_packets_goal=(unsigned long long)GetParameterInt(event_content,"collected_packets_goal");
 }

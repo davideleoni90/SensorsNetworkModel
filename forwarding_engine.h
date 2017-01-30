@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 
+typedef struct _ctp_data_packet_frame ctp_data_packet_frame;
 typedef struct _ctp_data_packet ctp_data_packet;
 
 /*
@@ -44,11 +45,15 @@ typedef struct _ctp_data_packet ctp_data_packet;
  */
 
 #ifndef NO_ROUTE_OFFSET
-#define NO_ROUTE_OFFSET 0.00010
+#define NO_ROUTE_OFFSET 10
 #endif
 
 #ifndef SEND_PACKET_TIMER
-#define SEND_PACKET_TIMER 0.00010 // Period of the timer that triggers the sending of a new data packet (in seconds)
+#define SEND_PACKET_TIMER 1 // Period of the timer that triggers the sending of a new data packet (in seconds)
+#endif
+
+#ifndef CREATE_PACKET_TIMER
+#define CREATE_PACKET_TIMER 3 // Period of the timer that triggers the creating of a new data packet (in seconds)
 #endif
 
 #ifndef MIN_PAYLOAD
@@ -70,5 +75,6 @@ void transmitted_data_packet(node_state* state,bool result);
 void received_data_packet(void* message,node_state* state);
 bool is_congested(node_state* state);
 void parse_forwarding_engine_parameters(void* event_content);
+bool compare_data_packets(ctp_data_packet_frame* a,ctp_data_packet_frame* b,int payload_a,int payload_b);
 
 #endif

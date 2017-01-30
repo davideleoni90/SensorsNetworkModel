@@ -18,7 +18,7 @@ typedef struct _route_info route_info;
 #endif
 
 #ifndef UPDATE_ROUTE_TIMER
-#define UPDATE_ROUTE_TIMER 0.008 // After such interval of time, the route of the node is (re)computed (in seconds)
+#define UPDATE_ROUTE_TIMER 8 // After such interval of time, the route of the node is (re)computed (in seconds)
 #endif
 
 #ifndef INVALID_ADDRESS
@@ -75,5 +75,6 @@ void schedule_beacons_interval_update(node_state* state);
 void double_beacons_send_interval(node_state* state);
 bool is_neighbor_worth_inserting(ctp_routing_frame* routing_frame,node_state* state);
 void parse_routing_engine_parameters(void* event_content);
+bool compare_beacons(ctp_routing_frame* a,ctp_routing_frame* b);
 
 #endif

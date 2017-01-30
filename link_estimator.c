@@ -1504,3 +1504,16 @@ void ack_received(unsigned int recipient,bool ack_received,link_estimator_table_
                         update_outgoing_quality(entry);
         }
 }
+
+/*
+ * COMPARE LINK ESTIMATOR FRAMES
+ *
+ * Helper function that returns true if two given link estimator layer frames coincide, false otherwise
+ *
+ * @a: pointer to the first link estimator layer frame
+ * @b: pointer to the second link estimator layer frame
+ */
+
+bool compare_link_estimator_frames(ctp_link_estimator_frame* a,ctp_link_estimator_frame* b){
+        return a->seq==b->seq;
+}

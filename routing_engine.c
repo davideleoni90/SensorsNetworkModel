@@ -658,6 +658,7 @@ void update_route(node_state* state){
                          */
 
                         route->parent=best_entry->neighbor;
+                        node_statistics_list[state->me].valid_parent+=1;
 
                         /*
                          * Then set the corresponding ETX
@@ -1172,8 +1173,9 @@ bool get_etx(unsigned short* etx,node_state* state){
          * Return false if the given pointer is not valid or if the node hasn't a valid parent
          */
 
-        if(!etx || state->route.parent==INVALID_ADDRESS)
+        if(!etx || state->route.parent==INVALID_ADDRESS) {
                 return false;
+        }
 
         /*
          * The node has a valid parent.
@@ -1232,4 +1234,17 @@ unsigned int get_parent(node_state* state){
          */
 
         return parent;
+}
+
+/*
+ * COMPARE BEACONS
+ *
+ * Helper function that returns true if two given routing packet frames coincide, false otherwise
+ *
+ * @a:pointer to the first beacon
+ * @b:pointer to the other beacon
+ */
+
+bool compare_beacons(ctp_routing_frame* a,ctp_routing_frame* b){
+        return a->ETX==b->ETX && a->options==b->options && a->parent==b->parent;
 }

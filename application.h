@@ -23,15 +23,17 @@ enum{
         START_NODE=1,
         SEND_BEACONS_TIMER_FIRED=2, // The timer for beacons has been fired  => broadcast a beacon
         SEND_PACKET_TIMER_FIRED=3, // The timer for data packets has been fired  => send a data packet
-        UPDATE_ROUTE_TIMER_FIRED=4, // The timer for updating the route has been fired
-        SET_BEACONS_TIMER=5, // The interval of the timer for beacons has to be updated
-        RETRANSMITT_DATA_PACKET=6, // Try to re-send a data packet whose first sending attempt failed
-        ACK_RECEIVED=7, // The ack for the last data packet sent has just been received
-        CHECK_CHANNEL_FREE=8, // The link layer has to check whether the channel is free
-        START_FRAME_TRANSMISSION=9, // The link layer starts to transmit a frame over the channel
-        FRAME_TRANSMITTED=10, // The frame has been transmitted
-        TRANSMISSION_STARTED=11, // The transmission of a new frame has started
-        TRANSMISSION_FINISHED=13, // The transmission of a new frame has finished
+        CREATE_PACKET_TIMER_FIRED=4, // // The timer for data packets has been fired  => create a data packet
+        UPDATE_ROUTE_TIMER_FIRED=5, // The timer for updating the route has been fired
+        SET_BEACONS_TIMER=6, // The interval of the timer for beacons has to be updated
+        RETRANSMITT_DATA_PACKET=7, // Try to re-send a data packet whose first sending attempt failed
+        ACK_RECEIVED=8, // The ack for the last data packet sent has just been received
+        CHECK_CHANNEL_FREE=9, // The link layer has to check whether the channel is free
+        START_FRAME_TRANSMISSION=10, // The link layer starts to transmit a frame over the channel
+        FRAME_TRANSMITTED=11, // The frame has been transmitted
+        TRANSMISSION_BEACON_STARTED=12, // The transmission of a new frame containing a beacon has started
+        TRANSMISSION_DATA_PACKET_STARTED=13, // The transmission of a new frame containing a data packet has started
+        TRANSMISSION_FINISHED=14, // The transmission of a new frame has finished
 };
 
 /*
@@ -265,6 +267,17 @@ typedef struct _node_statistics{
         unsigned long data_packets_sent; // The number of data packets sent by the node
         unsigned long data_packets_acked; // The number of data packets sent by the node that have been acked
         unsigned long collected_packets; // The number of packets sent by the node and collected by the root
+        //TODO REMOVE FOLLOWINGS
+        unsigned long stopped_busy;
+        unsigned long stopped_etx;
+        unsigned long stopped_no_packet;
+        unsigned long stopped_cache;
+        unsigned long stopped_link;
+        unsigned long passed_etx_check;
+        unsigned int valid_parent;
+        unsigned long lost_beacons;
+        unsigned long lost_data_packets;
+
 }node_statistics;
 
 /*
@@ -324,7 +337,9 @@ typedef struct _node_state{
 
         /*
          * Pointer to the link layer frame of the next packet to be sent: if upper layers ask for the transmission of a
-         * new packet and this point is not set to NULL, the link layer ignores the requests
+         * new packet and this point is not set to NULL, the link layer ignores the requests. This may happen while the
+         * link layer is collecting samples of the free channel before sending a packet and an upper layer asks for the
+         * sending of a new packet
          */
 
         link_layer_frame* link_layer_outgoing;

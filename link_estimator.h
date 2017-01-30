@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 typedef struct _ctp_routing_packet ctp_routing_packet;
+typedef struct _ctp_link_estimator_frame ctp_link_estimator_frame;
 typedef struct _node_state node_state;
 typedef double simtime_t;
 
@@ -158,5 +159,6 @@ int insert_neighbor(unsigned int neighbor,link_estimator_table_entry* link_estim
 void ack_received(unsigned int recipient,bool ack_received,link_estimator_table_entry* link_estimator_table);
 void init_link_estimator_table(link_estimator_table_entry* link_estimator_table);
 void parse_link_estimator_parameters(void* event_content);
+bool compare_link_estimator_frames(ctp_link_estimator_frame* a,ctp_link_estimator_frame* b);
 
 #endif

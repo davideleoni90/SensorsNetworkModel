@@ -89,7 +89,7 @@ void parse_link_layer_parameters(void* event_content){
         if(IsParameterPresent(event_content, "csma_ack_time"))
                 csma_ack_time=(unsigned int)GetParameterInt(event_content,"csma_ack_time");
         if(IsParameterPresent(event_content, "csma_sensitivity"))
-                csma_sensitivity=GetParameterDouble(event_content,"csma_sensitivity");
+                csma_sensitivity = GetParameterDouble(event_content, "csma_sensitivity");
 }
 
 /*
@@ -593,4 +593,17 @@ void frame_received(node_state* state,void* frame, unsigned char type){
                 received_data_packet(frame,state);
 
         }
+}
+
+/*
+ * COMPARE LINK LAYER FRAMES
+ *
+ * Helper function that returns true if two given link layer frames coincide, false otherwise
+ *
+ * @a: pointer to the first link layer frame
+ * @b: pointer to the second link layer frame
+ */
+
+bool compare_link_layer_frames(link_layer_frame* a,link_layer_frame* b){
+        return a->duration==b->duration && a->gain==b->gain && a->sink==b->sink && a->src==b->src;
 }

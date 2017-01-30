@@ -30,7 +30,9 @@ double channel_free_threshold=CHANNEL_FREE_THRESHOLD;
 
 /* GLOBAL VARIABLES - end */
 
-extern unsigned int csma_sensitivity;
+extern double csma_sensitivity;
+extern node_statistics* node_statistics_list;
+typedef struct _pending_transmission pending_transmission;
 
 /*
  * GAIN ADJACENCY LIST
@@ -115,7 +117,7 @@ pending_transmission* create_pending_transmission(unsigned char type,void* frame
          * Allocate a new instance of type "pending_transmission"
          */
 
-        pending_transmission* new_transmission=malloc(sizeof(pending_transmission));
+        pending_transmission* new_transmission=(pending_transmission*)malloc(sizeof(pending_transmission));
 
         /*
          * Set to zero the allocated buffer
@@ -361,7 +363,59 @@ void add_noise_entry(unsigned int node, double noise_floor, double white_noise){
  */
 
 bool compare_pending_transmissions(pending_transmission*a,pending_transmission*b){
-        return a==b;
+
+        /*
+         * Check if the metadata of the two transmissions coincide
+         */
+
+        if(a->frame_type==b->frame_type && a->lost==b->lost && a->power==b->power){
+
+                /*
+                 * Determine the type of frames brought by the transmissions
+                 */
+
+                if(a->frame_type==CTP_BEACON){
+
+                        /*
+                         * The frames are beacons
+                         */
+
+                        ctp_routing_packet* beacon_a=&a->frame.routing_packet;
+                        ctp_routing_packet* beacon_b=&b->frame.routing_packet;
+
+                        /*
+                         * Return true if the the beacons coincide
+                         */
+
+                        return compare_link_layer_frames(&beacon_a->link_frame,&beacon_b->link_frame) &&
+                               compare_link_estimator_frames(&beacon_a->link_estimator_frame,
+                                                             &beacon_b->link_estimator_frame) &&
+                               compare_beacons(&beacon_a->routing_frame,&beacon_b->routing_frame);
+                }
+                else{
+
+                        /*
+                         * The frames are data packets
+                         */
+
+                        ctp_data_packet* data_packet_a=&a->frame.data_packet;
+                        ctp_data_packet* data_packet_b=&b->frame.data_packet;
+
+                        /*
+                         * Return true if the data packets coincide
+                         */
+
+                        return compare_link_layer_frames(&data_packet_a->link_frame,&data_packet_b->link_frame) &&
+                               compare_data_packets(&data_packet_a->data_packet_frame,&data_packet_b->data_packet_frame,
+                               data_packet_a->payload,data_packet_b->payload);
+                }
+        }
+
+        /*
+         * The two objects refers to different transmissions because they have different metadata => return false
+         */
+
+        return false;
 }
 
 /*
@@ -423,6 +477,12 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
         pending_transmission* last_transmission=NULL;
 
         /*
+         * Boolean value telling whether the new transmission has enough power to be received by the node
+         */
+
+        bool lost_transmission;
+
+        /*
          * Counter of pending transmissions
          */
 
@@ -442,9 +502,8 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
                 double channel_strength=compute_signal_strength(state);
 
                 /*
-                 * Check if the gain of the link is enough strong for the frame to be delivered,
-                 * considering the actual strength of the signal sensed by the node: if not, the frame
-                 * is dropped
+                 * Check if the gain of the link is enough strong for the frame to be delivered, considering the
+                 * actual strength of the signal sensed by the node: if not, the frame is dropped
                  */
 
                 if(channel_strength+csma_sensitivity<gain){
@@ -565,6 +624,14 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
         pending_transmission* predecessor=NULL;
 
         /*
+         * The address given as second parameter does not coincide with the address of the object representing the
+         * finished transmission in the list of the pending transmissions => we have to find it scanning the list.
+         * It is used to free memory allocated for the transmission
+         */
+
+        pending_transmission* finished_transmission_list=NULL;
+
+        /*
          * Type of the content of the frame transmitted
          */
 
@@ -589,7 +656,8 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
         while(current_transmission!=NULL){
 
                 /*
-                 * Check if the transmission analyzed is the predecessor
+                 * Check if the transmission analyzed is predecessor of the transmission finisehed in the list of
+                 * pending transmissions
                  */
 
                 if(current_transmission->next &&
@@ -601,6 +669,11 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
 
                         predecessor=current_transmission;
 
+                        /*
+                         * Found the address of the pending transmission in the list
+                         */
+
+                        finished_transmission_list=current_transmission->next;
                 }
 
                 /*
@@ -626,7 +699,22 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          */
 
         if(predecessor){
-                predecessor->next=finished_transmission->next;
+
+                /*
+                 * The list has this structure at the moment:
+                 *
+                 * ...->x->y->z..
+                 *
+                 * where y is the element to be removed
+                 */
+
+                predecessor->next=predecessor->next->next;
+
+                /*
+                 * Now the list is like this:
+                 *
+                 * ...x->z..
+                 */
         }
         else{
 
@@ -634,7 +722,8 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                  * If it is the first element of the list, update the pointer to the list
                  */
 
-                state->pending_transmissions=finished_transmission->next;
+                finished_transmission_list=state->pending_transmissions;
+                state->pending_transmissions=state->pending_transmissions->next;
         }
 
         /*
@@ -650,6 +739,10 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
 
         if(finished_transmission->power-csma_sensitivity<compute_signal_strength(state)) {
                 finished_transmission->lost = true;
+                if(finished_transmission->frame_type==CTP_BEACON)
+                        node_statistics_list[state->me].lost_beacons+=1;
+                else
+                        node_statistics_list[state->me].lost_data_packets+=1;
         }
 
         /*
@@ -724,7 +817,7 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          * Finally remove the element associated to the pending transmission
          */
 
-        //free(finished_transmission);
+        free(finished_transmission_list);
 
 }
 
@@ -820,7 +913,7 @@ void transmit_frame(node_state* state,unsigned char type){
                          * transmitted
                          */
 
-                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_STARTED,state->radio_outgoing,
+                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_BEACON_STARTED,state->radio_outgoing,
                                          sizeof(ctp_routing_packet));
 
                 }
@@ -837,7 +930,7 @@ void transmit_frame(node_state* state,unsigned char type){
                          * transmitted
                          */
 
-                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_STARTED,state->radio_outgoing,
+                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_DATA_PACKET_STARTED,state->radio_outgoing,
                                          sizeof(ctp_data_packet));
                 }
 

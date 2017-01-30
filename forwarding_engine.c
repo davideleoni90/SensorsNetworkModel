@@ -44,6 +44,7 @@ double data_packet_transmission_offset=DATA_PACKET_RETRANSMISSION_OFFSET;
 double data_packet_transmission_delta=DATA_PACKET_RETRANSMISSION_DELTA;
 double no_route_offset=NO_ROUTE_OFFSET;
 double send_packet_timer=SEND_PACKET_TIMER;
+double create_packet_timer=CREATE_PACKET_TIMER;
 unsigned int min_payload=MIN_PAYLOAD;
 unsigned int max_payload=MAX_PAYLOAD;
 
@@ -68,6 +69,8 @@ void parse_forwarding_engine_parameters(void* event_content) {
                 no_route_offset = GetParameterDouble(event_content,"no_route_offset");
         if (IsParameterPresent(event_content, "send_packet_timer"))
                 send_packet_timer = GetParameterDouble(event_content,"send_packet_timer");
+        if (IsParameterPresent(event_content, "create_packet_timer"))
+                create_packet_timer = GetParameterDouble(event_content,"create_packet_timer");
         if (IsParameterPresent(event_content, "min_payload"))
                 min_payload = (unsigned int) GetParameterInt(event_content,"min_payload");
         if (IsParameterPresent(event_content, "max_payload"))
@@ -635,15 +638,25 @@ void start_forwarding_engine(node_state* state){
          * Check if it's the root node: if not, schedule the sending of a data packet
          */
 
-        if(!state->root)
+        if(!state->root) {
 
                 /*
-                 * Start the periodic timer with interval SEND_PACKET_TIMER: every time is fired, the a data packet is
-                 * created and sent.
+                 * Start the periodic timer with interval SEND_PACKET_TIMER: every time is fired, the data packet in
+                 * the head of the output queue is sent.
                  * The simulator is in charge of re-setting the timer every time it is fired
                  */
 
-                wait_until(state->me,state->lvt+send_packet_timer,SEND_PACKET_TIMER_FIRED);
+                wait_until(state->me, state->lvt + send_packet_timer, SEND_PACKET_TIMER_FIRED);
+
+                /*
+                 * Start the periodic timer with interval CREATE_PACKET_TIMER: every time is fired, a new data packet
+                 * containing data sampled from sensors is put in the output queue
+                 * The simulator is in charge of re-setting the timer every time it is fired
+                 */
+
+                wait_until(state->me, state->lvt + create_packet_timer, CREATE_PACKET_TIMER_FIRED);
+
+        }
 }
 
 /*
@@ -688,7 +701,7 @@ bool send_data_packet(node_state* state) {
         unsigned int parent;
 
         /*
-         * Boolen variable telling whether the data packet has been successfully submitted to the underlying LINK
+         * Boolean variable telling whether the data packet has been successfully submitted to the underlying LINK
          * LAYER
          */
 
@@ -703,7 +716,7 @@ bool send_data_packet(node_state* state) {
                 /*
                  * Output queue is empty => return false because a further invocation will be of no help
                  */
-
+                node_statistics_list[state->me].stopped_no_packet+=1;
                 return false;
         }
 
@@ -712,8 +725,10 @@ bool send_data_packet(node_state* state) {
          * before submitting a new packet
          */
 
-        if(state->state&SENDING)
+        if(state->state&SENDING) {
+                node_statistics_list[state->me].stopped_busy+=1;
                 return false;
+        }
 
         /*
          * The output queue is not empty and the node is not sending another packet.
@@ -736,8 +751,10 @@ bool send_data_packet(node_state* state) {
                  * least an interval of time equal to NO_ROUTE_RETRY
                  */
 
+                node_statistics_list[state->me].stopped_etx+=1;
                 return false;
         }
+        node_statistics_list[state->me].passed_etx_check+=1;
 
         /*
          * The node has a valid route (parent) => before sending the head packet, check that it's not duplicated.
@@ -770,6 +787,7 @@ bool send_data_packet(node_state* state) {
                  * of the queue may not be a duplicate
                  */
 
+                node_statistics_list[state->me].stopped_cache+=1;
                 return true;
         }
 
@@ -791,7 +809,7 @@ bool send_data_packet(node_state* state) {
          */
 
         if(is_congested(state))
-                first_entry->packet.data_packet_frame.options|=CTP_CONGESTED;
+                first_entry->packet.data_packet_frame.options |= CTP_CONGESTED;
         else
                 first_entry->packet.data_packet_frame.options&=~CTP_CONGESTED;
 
@@ -820,6 +838,8 @@ bool send_data_packet(node_state* state) {
 
         if(submitted)
                 state->state|=SENDING;
+        else
+                node_statistics_list[state->me].stopped_link+=1;
 
         /*
          * The data packet has been sent => no need to re-execute this function
@@ -1400,23 +1420,18 @@ bool is_congested(node_state* state){
 }
 
 /*
- * COMPARE PACKETS
+ * COMPARE DATA PACKETS
  *
- * Returns true if all their fields coincide, false otherwise
+ *  Helper function that returns true if two given data packet frames and their respective payloads coincide, false
+ *  otherwise
  *
  * @a:pointer to the first packet
  * @b:pointer to the other packet
+ * @payload_a: the payload of the first packet
+ * @payload_b: the payload of the second packet
  */
 
-bool compare_packets(ctp_data_packet* a,ctp_data_packet* b){
-        if(a->payload==b->payload && a->link_frame.sink==b->link_frame.sink&&
-                a->link_frame.src==b->link_frame.src &&
-                a->data_packet_frame.ETX==b->data_packet_frame.ETX &&
-                a->data_packet_frame.origin==b->data_packet_frame.origin &&
-                a->data_packet_frame.seqNo==b->data_packet_frame.seqNo&&
-                a->data_packet_frame.THL==b->data_packet_frame.THL&&
-                a->data_packet_frame.options==b->data_packet_frame.options)
-                return true;
-
-        return false;
+bool compare_data_packets(ctp_data_packet_frame* a,ctp_data_packet_frame* b,int payload_a,int payload_b){
+        return payload_a==payload_b && a->ETX==b->ETX && a->origin==b->origin && a->seqNo==b->seqNo&&
+                a->THL==b->THL&& a->options==b->options;
 }
