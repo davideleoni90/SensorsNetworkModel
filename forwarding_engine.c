@@ -716,7 +716,6 @@ bool send_data_packet(node_state* state) {
                 /*
                  * Output queue is empty => return false because a further invocation will be of no help
                  */
-                node_statistics_list[state->me].stopped_no_packet+=1;
                 return false;
         }
 
@@ -726,7 +725,6 @@ bool send_data_packet(node_state* state) {
          */
 
         if(state->state&SENDING) {
-                node_statistics_list[state->me].stopped_busy+=1;
                 return false;
         }
 
@@ -751,10 +749,8 @@ bool send_data_packet(node_state* state) {
                  * least an interval of time equal to NO_ROUTE_RETRY
                  */
 
-                node_statistics_list[state->me].stopped_etx+=1;
                 return false;
         }
-        node_statistics_list[state->me].passed_etx_check+=1;
 
         /*
          * The node has a valid route (parent) => before sending the head packet, check that it's not duplicated.
@@ -787,7 +783,6 @@ bool send_data_packet(node_state* state) {
                  * of the queue may not be a duplicate
                  */
 
-                node_statistics_list[state->me].stopped_cache+=1;
                 return true;
         }
 
@@ -838,8 +833,6 @@ bool send_data_packet(node_state* state) {
 
         if(submitted)
                 state->state|=SENDING;
-        else
-                node_statistics_list[state->me].stopped_link+=1;
 
         /*
          * The data packet has been sent => no need to re-execute this function

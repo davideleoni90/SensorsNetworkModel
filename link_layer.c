@@ -50,7 +50,7 @@ unsigned int csma_init_high=CSMA_INIT_HIGH;
 unsigned int csma_init_low=CSMA_INIT_LOW;
 unsigned int csma_rxtx_delay=CSMA_RXTX_DELAY;
 unsigned int csma_exponent_base=CSMA_EXPONENT_BASE;
-unsigned int csma_pramble_length=CSMA_PREAMBLE_LENGTH;
+unsigned int csma_preamble_length=CSMA_PREAMBLE_LENGTH;
 unsigned int csma_ack_time=CSMA_ACK_TIME;
 double csma_sensitivity=CSMA_SENSITIVITY;
 
@@ -85,7 +85,7 @@ void parse_link_layer_parameters(void* event_content){
         if(IsParameterPresent(event_content, "csma_exponent_base"))
                 csma_exponent_base=(unsigned int)GetParameterInt(event_content,"csma_exponent_base");
         if(IsParameterPresent(event_content, "csma_pramble_length"))
-                csma_pramble_length=(unsigned int)GetParameterInt(event_content,"csma_pramble_length");
+                csma_preamble_length=(unsigned int)GetParameterInt(event_content,"csma_pramble_length");
         if(IsParameterPresent(event_content, "csma_ack_time"))
                 csma_ack_time=(unsigned int)GetParameterInt(event_content,"csma_ack_time");
         if(IsParameterPresent(event_content, "csma_sensitivity"))
@@ -263,7 +263,11 @@ void check_channel(node_state* state){
 
                 state->link_layer_transmitting=true;
 
-                //TODO check if necessary state->radio_transmitting=true;
+                /*
+                 * Set the state of the radio to "transmitting"
+                 */
+
+                state->radio_state|=RADIO_TRANSMITTING;
 
                 /*
                  * Schedule a new event for the current node, after the above delay, whose handler will start the
@@ -350,6 +354,12 @@ void start_frame_transmission(node_state* state){
         unsigned char type=state->link_layer_outgoing_type;
 
         /*
+         * Set the state of the radio to RADIO_TRANSMITTING
+         */
+
+        //state->state|=RADIO_TRANSMITTING;
+
+        /*
          * Duration of the transmission of the frame, i.e. the time it takes for the neighbour nodes to successfully
          * receive a packet (including the time to transmit an acknowledgment, if required).
          * This depends on the number of bytes in the data frame (comprising the preamble added by the physical layer)
@@ -376,7 +386,7 @@ void start_frame_transmission(node_state* state){
          * Add the length (in symbols) of the preamble added by the physical layer
          */
 
-        duration+=csma_pramble_length;
+        duration+=csma_preamble_length;
 
         /*
          * In case the node expects an acknowledgment by the recipient for the frame being transmitted, add the number
@@ -520,6 +530,12 @@ void frame_transmitted(node_state* state){
          */
 
         state->link_layer_transmitting=false;
+
+        /*
+         * Clear the flag indicating that the radio is transmitting a frame
+         */
+
+        state->radio_state&=~RADIO_TRANSMITTING;
 
         /*
          * Signal reception to above layers, either to the FORWARDING ENGINE or the ROUTING ENGINE

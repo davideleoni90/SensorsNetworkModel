@@ -658,7 +658,6 @@ void update_route(node_state* state){
                          */
 
                         route->parent=best_entry->neighbor;
-                        node_statistics_list[state->me].valid_parent+=1;
 
                         /*
                          * Then set the corresponding ETX

@@ -9,9 +9,15 @@
 
 /* GLOBAL VARIABLES (shared among all logical processes) - start */
 
-unsigned long collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
+/*
+ * Default values of the parameters of the simulation
+ */
 unsigned long collected_packets_goal=COLLECTED_DATA_PACKETS_GOAL;
 double max_simulation_time=MAX_TIME;
+double failure_lambda=FAILURE_LAMBDA;
+double failure_threshold=FAILURE_THRESHOLD;
+
+unsigned long collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
 
 /*
  * The vector containing the statistics for each node of the network, including packets sent by each node that have
@@ -29,25 +35,6 @@ FILE* file; // Pointer to the file object associated to the configuration file
 
 unsigned int ctp_root=UINT_MAX;
 unsigned char failed_nodes=0; // Number of nodes failed; this is one of the reasons for the simulation to stop
-
-/*
- * FAILURE LAMBDA
- *
- * The lambda parameter of the exponential failure distribution: it depends on the devices used as node of the collection
- * tree and is equivalent to the failure rate or MTTF(Mean Time To Failure)
- */
-
-double failure_lambda=0.0005;
-
-/*
- * FAILURE PROBABILITY THRESHOLD
- *
- * The exponential failure distribution tells the probability that a failure occurs before a certain time =>
- * the following parameter determines which is the minimum probability for the node to be considered as failed by the
- * simulator
- */
-
-double failure_threshold=0.9;
 
 extern gain_entry** gains_list;
 extern noise_entry* noise_list;
@@ -737,8 +724,9 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                 /*
                                  * Root node does not send packets, only collects them
                                  */
-                                printf("Beacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
+                                printf("\n\nBeacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
                                 printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
+                                printf("\n***************\n");
                                 continue;
                         }
                         printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
@@ -748,15 +736,8 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                node_statistics_list[i].data_packets_received);
                         printf("Data packets sent by %d:%lu\n",i,node_statistics_list[i].data_packets_sent);
                         printf("Data packets sent (and acked) by %d:%lu\n",i,node_statistics_list[i].data_packets_acked);
-                        printf("No packet:%lu\n",node_statistics_list[i].stopped_no_packet);
-                        printf("Busy:%lu\n",node_statistics_list[i].stopped_busy);
-                        printf("etx:%lu\n",node_statistics_list[i].stopped_etx);
-                        printf("cache:%lu\n",node_statistics_list[i].stopped_cache);
-                        printf("link:%lu\n",node_statistics_list[i].stopped_link);
-                        printf("passed_etx_check:%lu\n",node_statistics_list[i].passed_etx_check);
-                        printf("valid parent:%u\n",node_statistics_list[i].valid_parent);
-                        printf("lost_beacons:%lu\n",node_statistics_list[i].lost_beacons);
-                        printf("lost_data_packets:%lu\n",node_statistics_list[i].lost_data_packets);
+                        printf("Beacons lost:%lu\n",node_statistics_list[i].lost_beacons);
+                        printf("Data packets lost :%lu\n",node_statistics_list[i].lost_data_packets);
                         printf("\n***************\n");
                 }
                 fflush(stdout);
@@ -789,6 +770,29 @@ bool OnGVT(unsigned int me, void*snapshot) {
                         printf("\n\nSimulation stopped because the root node has crashed at time %f\n"
                                        "Packets collected by root:%lu\n"
                                 ,((node_state*)snapshot)->lvt,collected_packets);
+                        for(i=0;i<n_prc_tot;i++) {
+                                if(i==ctp_root) {
+
+                                        /*
+                                         * Root node does not send packets, only collects them
+                                         */
+                                        printf("\n\nBeacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
+                                        printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
+                                        printf("\n***************\n");
+                                        continue;
+                                }
+                                printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
+                                printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
+                                printf("Beacons sent by %d:%lu\n",i,node_statistics_list[i].beacons_sent);
+                                printf("Data packets received by %d:%lu\n",i,
+                                       node_statistics_list[i].data_packets_received);
+                                printf("Data packets sent by %d:%lu\n",i,node_statistics_list[i].data_packets_sent);
+                                printf("Data packets sent (and acked) by %d:%lu\n",i,node_statistics_list[i].data_packets_acked);
+                                printf("Beacons lost :%lu\n",node_statistics_list[i].lost_beacons);
+                                printf("Data packets lost:%lu\n",node_statistics_list[i].lost_data_packets);
+                                printf("\n***************\n");
+                        }
+                        fflush(stdout);
                         return true;
                 }
 
@@ -1144,28 +1148,33 @@ void read_input_file(const char* path){
         }
 
         /*
+         * Remove the buffer allocated for the last line read
+         */
+
+        if(lineptr) {
+                printf("Lineptrr:%p\n",lineptr);
+                //free(lineptr);
+                printf("Freed\n");
+                fflush(stdout);
+        }
+
+        /*
          * Close the file stream
          */
 
         fclose(file);
 
         /*
-         * Remove the buffer allocated for the last line read
+         * Check that the list of gains is correct for all the nodes
          */
 
-        if(lineptr)
-                free(lineptr);
+        check_gains_list();
 
         /*
-         * Check that there's at least one link for each node by computing the difference between the number of elements
-         * in the gain list and the variable n_proc_tot: if not zero, abort simulation
+         * Check that the values for the noise are correct for all the nodes
          */
 
-        if(n_prc_tot-get_nodes()) {
-                printf("[FATAL ERROR] Missing link for %d node(s) in the file\n",
-                       n_prc_tot-get_nodes());
-                exit(EXIT_FAILURE);
-        }
+        check_noises_list();
 }
 
 /*
@@ -1185,7 +1194,7 @@ void parse_simulation_parameters(void* event_content) {
         if(IsParameterPresent(event_content, "failure_lambda"))
                 failure_lambda=GetParameterDouble(event_content,"failure_lambda");
         if(IsParameterPresent(event_content, "failure_threshold"))
-                failure_lambda=GetParameterDouble(event_content,"failure_threshold");
+                failure_threshold=GetParameterDouble(event_content,"failure_threshold");
         if(IsParameterPresent(event_content, "max_simulation_time"))
                 max_simulation_time = GetParameterDouble(event_content, "max_simulation_time");
         if(IsParameterPresent(event_content, "collected_packets_goal"))

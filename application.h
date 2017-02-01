@@ -7,6 +7,56 @@
 #include <ROOT-Sim.h>
 #include <math.h>
 
+/*
+ * PARAMETERS OF THE SIMULATION - start
+ */
+
+/*
+ * FAILURE LAMBDA
+ *
+ * The lambda parameter of the exponential failure distribution: it depends on the devices used as node of the collection
+ * tree and is equivalent to the failure rate or MTTF(Mean Time To Failure)
+ */
+
+#ifndef FAILURE_LAMBDA
+#define FAILURE_LAMBDA 0.0005
+#endif
+
+/*
+ * FAILURE PROBABILITY THRESHOLD
+ *
+ * The exponential failure distribution tells the probability that a failure occurs before a certain time =>
+ * the following parameter determines which is the minimum probability for the node to be considered as failed by the
+ * simulator
+ */
+
+#ifndef FAILURE_THRESHOLD
+#define FAILURE_THRESHOLD 0.9
+#endif
+
+/*
+ * MAX SIMULATION TIME
+ *
+ * Maximum value for the simulation time: when reached, the simulation stops (in seconds)
+ */
+
+#ifndef MAX_TIME
+#define MAX_TIME 10
+#endif
+
+/*
+ * COLLECTED DATA PACKETS GOAL
+ *
+ * Lower bound of data packets received by the root from each node for the simulation to stop
+ */
+
+#ifndef COLLECTED_DATA_PACKETS_GOAL
+#define COLLECTED_DATA_PACKETS_GOAL 10
+#endif
+
+/*
+ * PARAMETERS OF THE SIMULATION - end
+ */
 
 /*
  * EVENT TYPES
@@ -68,20 +118,6 @@ enum{
         BROADCAST_ADDRESS=0xffff, // A packet with such an address is sent to all the neighbor nodes
         CTP_BEACON=0x1, // Flag indicating that the packet is a beacon
         CTP_DATA_PACKET=0x2 // Flag indicating that the packet carries data from the sensor(s)
-};
-
-/*
- * SIMULATION CONSTANTS
- */
-
-enum{
-        MAX_TIME=1000, // Upper bound of data packets received by the root for the simulation to stop
-
-        /*
-         * Lower bound of data packets received by the root from each node for the simulation to stop
-         */
-
-        COLLECTED_DATA_PACKETS_GOAL=10
 };
 
 /*
@@ -267,16 +303,8 @@ typedef struct _node_statistics{
         unsigned long data_packets_sent; // The number of data packets sent by the node
         unsigned long data_packets_acked; // The number of data packets sent by the node that have been acked
         unsigned long collected_packets; // The number of packets sent by the node and collected by the root
-        //TODO REMOVE FOLLOWINGS
-        unsigned long stopped_busy;
-        unsigned long stopped_etx;
-        unsigned long stopped_no_packet;
-        unsigned long stopped_cache;
-        unsigned long stopped_link;
-        unsigned long passed_etx_check;
-        unsigned int valid_parent;
-        unsigned long lost_beacons;
-        unsigned long lost_data_packets;
+        unsigned long lost_beacons; // The number of beacons lost by the node
+        unsigned long lost_data_packets; // The number of data packets lost by the node
 
 }node_statistics;
 

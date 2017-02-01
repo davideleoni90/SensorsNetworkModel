@@ -107,11 +107,13 @@ void init_physical_layer(node_state* state){
  * @type: byte telling whether the frame contains a beacon or a data packet
  * @frame: pointer to the frame carried by the signal
  * @power: power of the signal
+ * @lost: boolean variable set to true if the transmission won't be received by the recipient, either because too
+ *        weak or because the node is busy receiving/transmitting
  *
  * Returns the address of the new instance
  */
 
-pending_transmission* create_pending_transmission(unsigned char type,void* frame, double power){
+pending_transmission* create_pending_transmission(unsigned char type,void* frame, double power,bool lost){
 
         /*
          * Allocate a new instance of type "pending_transmission"
@@ -187,10 +189,10 @@ pending_transmission* create_pending_transmission(unsigned char type,void* frame
         }
 
         /*
-         * The transmission has not been lost yet
+         * Set the flag indicating whether the frame has been lost or not
          */
 
-        new_transmission->lost=false;
+        new_transmission->lost=lost;
 
         /*
          * Set the next pointer to NULL: this will be the last pending transmission in the list
@@ -434,7 +436,7 @@ void send_ack(node_state* state,ctp_data_packet* packet){
          * If there's no other transmission going on, the packet is acknowledged
          */
 
-        if(state->radio_outgoing!=NULL) {
+        if(!state->radio_outgoing) {
 
                 /*
                  * The radio transceiver is not busy => get the sender of the packet and send it an event to inform
@@ -480,7 +482,7 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
          * Boolean value telling whether the new transmission has enough power to be received by the node
          */
 
-        bool lost_transmission;
+        bool lost_transmission=false;
 
         /*
          * Counter of pending transmissions
@@ -519,11 +521,13 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
                            !(state->radio_state&RADIO_TRANSMITTING)){
 
                                 /*
-                                 * The radio is not busy receiving another frame => the current frame
-                                 * is received => set the state of the radio to RADIO_RECEIVING
+                                 * The radio is not busy receiving or transmitting another frame => the current frame is
+                                 * received => set the state of the radio to RADIO_RECEIVING and clear the lost flag for
+                                 * the "pending_transmission" object that describes the transmission of the frame
                                  */
 
                                 state->radio_state|=RADIO_RECEIVING;
+                                lost_transmission=false;
                         }
 
                 }
@@ -570,7 +574,7 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
          * Create an entry for the the new pending transmission
          */
 
-        new_pending_transmission=create_pending_transmission(type,frame,gain);
+        new_pending_transmission=create_pending_transmission(type,frame,gain,lost_transmission);
 
         /*
          * Check if there are other pending transmissions
@@ -822,20 +826,112 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
 }
 
 /*
- * GET NODES
+ * CHECK GAINS LIST
  *
- * Returns the number of lists in gains_list: this is used to check that the input file contains the description of at
- * least one link for each node
+ * This function checks that there's a list of gains for each node in the simulation and that such a list contains
+ * exactly a number of elements equal to n_prc_tot-1: if this two conditions are not verified, the simulation is aborted
  */
 
-unsigned int get_nodes(){
-        unsigned int nodes_counter=0;
+void check_gains_list(){
+
+        /*
+         * Counter of elements in each list
+         */
+
+        unsigned int counter=0;
+
+        /*
+         * Index of the node
+         */
+
         unsigned int index;
+
+        /*
+         * Check correctness of the list for each node
+         */
+
         for(index=0;index<n_prc_tot;index++){
-                if(gains_list[index])
-                        nodes_counter++;
+
+                /*
+                 * Check that there is a list of gains for node "index"
+                 */
+
+                if(gains_list[index]) {
+
+                        /*
+                         * The first element of the list
+                         */
+
+                        gain_entry *current =gains_list[index];
+
+                        /*
+                         * Count the number of elements in the list
+                         */
+
+                        while(current){
+                                counter++;
+                                current=current->next;
+                        }
+
+                        /*
+                         * Check that the list contains n_prc_tot-1 elements: if not, return false
+                         */
+
+                        if(counter!=n_prc_tot-1) {
+                                printf("[FATAL ERROR] Node %d has %d links; they have to be %d\n",index,counter,
+                                       n_prc_tot-1);
+                                exit(EXIT_FAILURE);
+                        }
+
+                        /*
+                         * The list of gains for the current node is correct = > resent the counter and go to the next
+                         * node
+                         */
+
+                        counter=0;
+                        continue;
+                }
+
+                /*
+                 * The list of gains of the links for the current node is missing => abort
+                 */
+
+                printf("[FATAL ERROR] No link specified for node %d; they have to be %d\n",index,n_prc_tot-1);
+                exit(EXIT_FAILURE);
         }
-        return nodes_counter;
+}
+
+/*
+ * CHECK NOISE LIST
+ *
+ * This function checks that there's a value of noise floor and white gaussian noise for each node in the simulation and
+ * if this condition is not verified, the simulation is aborted
+ */
+
+void check_noises_list(){
+
+        /*
+         * Index of the node
+         */
+
+        unsigned int index;
+
+        /*
+         * Check correctness of the value for each node
+         */
+
+        for(index=0;index<n_prc_tot;index++){
+
+                /*
+                 * Check that the noise entry for node "index" is initialized: if not, abort the simulation
+                 */
+
+                if(!noise_list[index].noise_floor && !noise_list[index].range) {
+                        printf("[FATAL ERROR] Noise for node %d is not given\n", index);
+                        exit(EXIT_FAILURE);
+                }
+        }
+
 }
 
 /*
