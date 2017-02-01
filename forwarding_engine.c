@@ -1256,56 +1256,68 @@ void transmitted_data_packet(node_state* state,bool result) {
                  * the head of the output queue is the last acknowledged
                  */
 
-                if (head == state->last_packet_acked) {
-
-                        /*
-                         * The packet has been acknowledged => remove the message from the output queue, so that next
-                         * transmission phase will send the next packet in the output queue
-                         */
-
-                        forwarding_queue_dequeue(state);
-
-                        /*
-                         * Remove the SENDING FLAG
-                         */
-
-                        state->state &= ~SENDING;
-
-                        /*
-                         * Inform the LINK ESTIMATOR about the fact that the recipient acknowledged the data packet,
-                         * since this piece of information is used by the LINK ESTIMATOR to re-calculate the outgoing
-                         * link quality between the current node and the recipient => extract the ID of the latter from
-                         * the last data packet sent
-                         */
-
-                        ack_received(head->link_frame.sink, true, state->link_estimator_table);
-
-                        /*
-                         * If the last packet sent was a forwarded one, insert in the output cache in order to avoid
-                         * duplicates
-                         */
-
-                        if (!head_entry->is_local) {
-                                cache_enqueue(&head_entry->packet.data_packet_frame, state);
+                if(state->last_packet_acked) {
+                        if (compare_data_packets(&head->data_packet_frame, &state->last_packet_acked->data_packet_frame,
+                                                 head->payload, state->last_packet_acked->payload) &&
+                            head->link_frame.src== state->last_packet_acked->link_frame.src &&
+                                head->link_frame.sink== state->last_packet_acked->link_frame.sink) {
 
                                 /*
-                                 * Return the entry of the last sent data packet to the forwarding pool
+                                 * The packet has been acknowledged => remove the message from the output queue, so that
+                                 * next transmission phase will send the next packet in the output queue
                                  */
 
-                                forwarding_pool_put(head_entry, state);
+                                forwarding_queue_dequeue(state);
 
                                 /*
-                                 * Clear the flag indicating that a local data packet is being sent
+                                 * Remove the SENDING FLAG
                                  */
 
-                                state->sending_data_packet=false;
+                                state->state &= ~SENDING;
+
+                                /*
+                                 * Inform the LINK ESTIMATOR about the fact that the recipient acknowledged the data
+                                 * packet, since this piece of information is used by the LINK ESTIMATOR to re-calculate
+                                 * the outgoing link quality between the current node and the recipient => extract the
+                                 * ID of the latter from the last data packet sent
+                                 */
+
+                                ack_received(head->link_frame.sink, true, state->link_estimator_table);
+
+                                /*
+                                 * If the last packet sent was a forwarded one, insert in the output cache in order to
+                                 * avoid
+                                 * duplicates
+                                 */
+
+                                if (!head_entry->is_local) {
+                                        cache_enqueue(&head_entry->packet.data_packet_frame, state);
+
+                                        /*
+                                         * Return the entry of the last sent data packet to the forwarding pool
+                                         */
+
+                                        forwarding_pool_put(head_entry, state);
+
+                                        /*
+                                         * Clear the flag indicating that a local data packet is being sent
+                                         */
+
+                                        state->sending_data_packet = false;
+                                }
+
+                                /*
+                                 * Update statistics about data packets sent by the node that have been acked
+                                 */
+
+                                node_statistics_list[state->me].data_packets_acked += 1;
+
+                                /*
+                                 * Reset the pointer to the last acked packed
+                                 */
+
+                                state->last_packet_acked=NULL;
                         }
-
-                        /*
-                         * Update statistics about data packets sent by the node that have been acked
-                         */
-
-                        node_statistics_list[state->me].data_packets_acked+=1;
                 }
                 else{
 

@@ -32,7 +32,6 @@
  * equal to CSMA_MIN_FREE_SAMPLES before starting to send a frame; also there's an upper bound for the number of times
  * the node checks if the channel is free (CSMA_MAX_FREE_SAMPLES).
  * The initial value for the backoff time is selected in the range [CSMA_INIT_LOW,CSMA_INIT_HIGH]
- * TODO conclude description
  */
 
 /* GLOBAL VARIABLES - start

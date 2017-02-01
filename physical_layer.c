@@ -423,8 +423,7 @@ bool compare_pending_transmissions(pending_transmission*a,pending_transmission*b
 /*
  * SEND ACK
  *
- * Function dedicated to the sending of the acknowledgement for a frame in case this contains a data packet. The ack
- * can be sent by the node only if it's not busy sending another frame.
+ * Function dedicated to the sending of the acknowledgement for a frame in case this contains a data packet
  *
  * @state: pointer to the object representing the current state of the node
  * @packet: pointer to the frame containing the data packet
@@ -444,7 +443,13 @@ void send_ack(node_state* state,ctp_data_packet* packet){
                  */
 
                 unsigned int sender=packet->link_frame.src;
-                ScheduleNewEvent(sender,state->lvt,ACK_RECEIVED,packet,sizeof(ctp_data_packet));
+                if(sender<n_prc_tot)
+                        ScheduleNewEvent(sender,state->lvt,ACK_RECEIVED,packet,sizeof(ctp_data_packet));
+                else{
+                        printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
+                                       "\n", sender);
+                        exit(EXIT_FAILURE);
+                }
 
         }
 }
@@ -482,7 +487,7 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
          * Boolean value telling whether the new transmission has enough power to be received by the node
          */
 
-        bool lost_transmission=false;
+        bool lost_transmission=true;
 
         /*
          * Counter of pending transmissions
@@ -604,8 +609,14 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
          * Schedule a new event corresponding to the moment when the transmission will be finished
          */
 
-        ScheduleNewEvent(state->me,state->lvt+duration,TRANSMISSION_FINISHED,new_pending_transmission,
+        if(state->me<n_prc_tot)
+                ScheduleNewEvent(state->me,state->lvt+duration,TRANSMISSION_FINISHED,new_pending_transmission,
                          sizeof(pending_transmission));
+        else{
+                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
+                               "\n", state->me);
+                exit(EXIT_FAILURE);
+        }
 }
 
 /*
@@ -652,6 +663,10 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
          */
 
         pending_transmission* current_transmission=state->pending_transmissions;
+        if(!state->pending_transmissions) {
+                printf("pending transmissions NULL\n");
+                fflush(stdout);
+        }
 
         /*
          * Go through all the pending transmissions
@@ -1009,8 +1024,14 @@ void transmit_frame(node_state* state,unsigned char type){
                          * transmitted
                          */
 
-                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_BEACON_STARTED,state->radio_outgoing,
+                        if(sink<n_prc_tot)
+                                ScheduleNewEvent(sink,state->lvt,TRANSMISSION_BEACON_STARTED,state->radio_outgoing,
                                          sizeof(ctp_routing_packet));
+                        else{
+                                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
+                                               "\n", sink);
+                                exit(EXIT_FAILURE);
+                        }
 
                 }
                 else{
@@ -1026,8 +1047,14 @@ void transmit_frame(node_state* state,unsigned char type){
                          * transmitted
                          */
 
-                        ScheduleNewEvent(sink,state->lvt,TRANSMISSION_DATA_PACKET_STARTED,state->radio_outgoing,
+                        if(sink<n_prc_tot)
+                                ScheduleNewEvent(sink,state->lvt,TRANSMISSION_DATA_PACKET_STARTED,state->radio_outgoing,
                                          sizeof(ctp_data_packet));
+                        else{
+                                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
+                                               "\n", sink);
+                                exit(EXIT_FAILURE);
+                        }
                 }
 
                 /*

@@ -277,10 +277,16 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * All the parameters of the configuration have been parsed => tell all the processes
                                  * that the time to start the simulation has come
                                  */
-                                for(i=0;i<n_prc_tot;i++)
-                                        //ScheduleNewEvent(i,now+(simtime_t)Random(),START_NODE,NULL,0);
-                                        ScheduleNewEvent(i,now+1,START_NODE,NULL,0);
-
+                                for(i=0;i<n_prc_tot;i++) {
+                                        if (i < n_prc_tot)
+                                                //ScheduleNewEvent(i, now + 1+(simtime_t)Random(), START_NODE, NULL, 0);
+                                                ScheduleNewEvent(i, now + 1, START_NODE, NULL, 0);
+                                        else{
+                                                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
+                                                               "\n", i);
+                                                exit(EXIT_FAILURE);
+                                        }
+                                }
                         }
 
                         break;
@@ -713,7 +719,6 @@ bool OnGVT(unsigned int me, void*snapshot) {
          * If the value of virtual time is beyond the limit, stop the simulation
          */
 
-        //TODO remove some print
         if((((node_state*)snapshot)->lvt>max_simulation_time) &&( ((node_state*)snapshot)->lvt>1.0)){
                 printf("\n\nSimulation stopped because reached the limit of time:%f\n"
                                "Packets collected by root:%lu\n"
@@ -864,7 +869,13 @@ void wait_until(unsigned int me,simtime_t timestamp,unsigned int type){
          * Schedule a new event after "interval" instants of virtual time; no parameters are provide with the event
          */
 
-        ScheduleNewEvent(me,timestamp,type,NULL,0);
+        if(me<n_prc_tot)
+                ScheduleNewEvent(me,timestamp,type,NULL,0);
+        else{
+                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
+                               "\n", me);
+                exit(EXIT_FAILURE);
+        }
 }
 
 /*
@@ -1152,10 +1163,7 @@ void read_input_file(const char* path){
          */
 
         if(lineptr) {
-                printf("Lineptrr:%p\n",lineptr);
-                //free(lineptr);
-                printf("Freed\n");
-                fflush(stdout);
+                free(lineptr);
         }
 
         /*
