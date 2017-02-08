@@ -7,17 +7,16 @@
 #include "link_layer.h"
 #include <limits.h>
 
-/* GLOBAL VARIABLES (shared among all logical processes) - start */
-
 /*
  * Default values of the parameters of the simulation
  */
+
 unsigned long collected_packets_goal=COLLECTED_DATA_PACKETS_GOAL;
 double max_simulation_time=MAX_TIME;
 double failure_lambda=FAILURE_LAMBDA;
 double failure_threshold=FAILURE_THRESHOLD;
 
-unsigned long collected_packets=0; // The number of packets successfully delivered by the root of the collection tree
+/* GLOBAL VARIABLES (shared among all logical processes) - start */
 
 /*
  * The vector containing the statistics for each node of the network, including packets sent by each node that have
@@ -34,13 +33,6 @@ FILE* file; // Pointer to the file object associated to the configuration file
  */
 
 unsigned int ctp_root=UINT_MAX;
-unsigned char failed_nodes=0; // Number of nodes failed; this is one of the reasons for the simulation to stop
-
-extern gain_entry** gains_list;
-extern noise_entry* noise_list;
-extern double update_route_timer;
-extern double send_packet_timer;
-extern double create_packet_timer;
 
 /* GLOBAL VARIABLES (shared among all logical processes) - end */
 
@@ -52,7 +44,13 @@ void start_routing_engine(node_state* state);
 bool is_failed(simtime_t now);
 void new_pending_transmission(node_state* state, double gain, unsigned char type,void* frame,double duration);
 void transmission_finished(node_state* state,pending_transmission* finished_transmission);
+void print_statistics(unsigned int root);
 
+extern gain_entry** gains_list;
+extern noise_entry* noise_list;
+extern double update_route_timer;
+extern double send_packet_timer;
+extern double create_packet_timer;
 /*
  * Application-level callback: this is the interface between the simulator and the model being simulated
  */
@@ -100,10 +98,10 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                 state->state &= ~RUNNING;
 
                                 /*
-                                 * Increment by one the counter of failed nodes
+                                 * Set the "failed" flag in the object representing the statistics of the node
                                  */
 
-                                failed_nodes++;
+                                node_statistics_list[state->me].failed=true;
 
                                 /*
                                  * Notify the user about the failure
@@ -277,15 +275,9 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * All the parameters of the configuration have been parsed => tell all the processes
                                  * that the time to start the simulation has come
                                  */
+
                                 for(i=0;i<n_prc_tot;i++) {
-                                        if (i < n_prc_tot)
-                                                //ScheduleNewEvent(i, now + 1+(simtime_t)Random(), START_NODE, NULL, 0);
-                                                ScheduleNewEvent(i, now + 1, START_NODE, NULL, 0);
-                                        else{
-                                                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
-                                                               "\n", i);
-                                                exit(EXIT_FAILURE);
-                                        }
+                                        ScheduleNewEvent(i, now+1, START_NODE, NULL, 0);
                                 }
                         }
 
@@ -471,7 +463,7 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * If the node is busy sending a packet keep waiting
                                  */
 
-                                if (!(state->state & SENDING)) {
+                                if (!(state->state & SENDING_DATA_PACKET)) {
 
                                         /*
                                          * The node is not sending any data packet: send the packet in the head of the
@@ -527,7 +519,8 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * Clear the SENDING flag before
                                  */
 
-                                state->state&=~SENDING;
+                                state->state&=~SENDING_DATA_PACKET;
+                                state->is_retransmitting=false;
                                 send_data_packet(state);
                         }
                         break;
@@ -669,7 +662,17 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
                                  * its turn, in order to update the estimation of the link quality
                                  */
 
-                                state->last_packet_acked=(ctp_data_packet*)event_content;
+                                //state->last_packet_acked=(ctp_data_packet*)event_content;
+                                state->last_packet_acked.link_frame.sink=((ctp_data_packet*)event_content)->link_frame.sink;
+                                state->last_packet_acked.link_frame.src=((ctp_data_packet*)event_content)->link_frame.src;
+                                state->last_packet_acked.link_frame.duration=((ctp_data_packet*)event_content)->link_frame.duration;
+                                state->last_packet_acked.link_frame.gain=((ctp_data_packet*)event_content)->link_frame.gain;
+                                state->last_packet_acked.payload=((ctp_data_packet*)event_content)->payload;
+                                state->last_packet_acked.data_packet_frame.ETX=((ctp_data_packet*)event_content)->data_packet_frame.ETX;
+                                state->last_packet_acked.data_packet_frame.options=((ctp_data_packet*)event_content)->data_packet_frame.options;
+                                state->last_packet_acked.data_packet_frame.origin=((ctp_data_packet*)event_content)->data_packet_frame.origin;
+                                state->last_packet_acked.data_packet_frame.seqNo=((ctp_data_packet*)event_content)->data_packet_frame.seqNo;
+                                state->last_packet_acked.data_packet_frame.THL=((ctp_data_packet*)event_content)->data_packet_frame.THL;
                         }
                         break;
 
@@ -694,13 +697,13 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
  * when all the logic processes return true.
  *
  * The aim of this model is to simulate the implementation of the Collection Tree Protocol (CTP) => we stop when the
- * root node has received a number of data packets greater than or equal to COLLECTED_DATA_PACKETS_GOAL from each node.
+ * root node has received a number of data packets greater than or equal to collected_packets_goal from each node.
  * As a consequence, all the logic processes associated to nodes of the collection tree will always return true here,
  * while the logic process associated to the root will return true iff the number of data packets collected from each
- * node is greater than or equal to COLLECTED_DATA_PACKETS_GOAL.
+ * node is greater than or equal to collected_packets_goal.
  * In order to avoid that the simulation runs forever if one of the nodes does not send enough packets, we also set a
- * time limit by mean of the variable MAX_TIME: when the virtual time reaches this value, the simulation stops, no
- * matter how many packets have been collected from each node.
+ * time limit by mean of the variable max_simulation_time: when the virtual time reaches this value, the simulation s
+ * tops, no matter how many packets have been collected from each node.
  *
  * The simulation also stops when the root node fails or if there's no other node alive but the root of the tree
  *
@@ -710,99 +713,92 @@ void ProcessEvent(unsigned int me, simtime_t now, int event_type, void *event_co
 bool OnGVT(unsigned int me, void*snapshot) {
 
         /*
-         * Index variable used to iterate through nodes of the simulation
+         * Counter of nodes failed so far
          */
 
-        int i=0;
+        unsigned int failed_nodes=0;
+
+        /*
+         * Variable used to scan the statistics of nodes
+         */
+
+        unsigned int i;
 
         /*
          * If the value of virtual time is beyond the limit, stop the simulation
          */
 
         if((((node_state*)snapshot)->lvt>max_simulation_time) &&( ((node_state*)snapshot)->lvt>1.0)){
-                printf("\n\nSimulation stopped because reached the limit of time:%f\n"
-                               "Packets collected by root:%lu\n"
-                        ,((node_state*)snapshot)->lvt,collected_packets);
-                for(i=0;i<n_prc_tot;i++) {
-                        if(i==ctp_root) {
 
-                                /*
-                                 * Root node does not send packets, only collects them
-                                 */
-                                printf("\n\nBeacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
-                                printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
-                                printf("\n***************\n");
-                                continue;
-                        }
-                        printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
-                        printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
-                        printf("Beacons sent by %d:%lu\n",i,node_statistics_list[i].beacons_sent);
-                        printf("Data packets received by %d:%lu\n",i,
-                               node_statistics_list[i].data_packets_received);
-                        printf("Data packets sent by %d:%lu\n",i,node_statistics_list[i].data_packets_sent);
-                        printf("Data packets sent (and acked) by %d:%lu\n",i,node_statistics_list[i].data_packets_acked);
-                        printf("Beacons lost:%lu\n",node_statistics_list[i].lost_beacons);
-                        printf("Data packets lost :%lu\n",node_statistics_list[i].lost_data_packets);
+                /*
+                 * The root node prints the result of the simulation and the reason why it stopped
+                 */
+
+                if(me==ctp_root) {
+                        printf("\n\nSimulation stopped because reached the limit of time:%f\n",
+                               ((node_state *) snapshot)->lvt);
                         printf("\n***************\n");
+                        print_statistics(ctp_root);
                 }
-                fflush(stdout);
                 return true;
         }
 
         /*
-         * Then check that there's at least one node running: if not, stop the simulation
+         * Get the number of failed nodes
+         */
+
+        for(i=0;i<n_prc_tot;i++){
+                if(node_statistics_list[i].failed)
+                        failed_nodes+=1;
+        }
+
+        /*
+         * Check that there's at least one node running: if not, stop the simulation
          */
 
         if(n_prc_tot-failed_nodes<=1) {
-                printf("\n\nSimulation stopped because only one node is still alive at time %f\n"
-                               "Packets collected by root:%lu\n"
-                        ,((node_state*)snapshot)->lvt,collected_packets);
+
+                /*
+                 * The root node prints the result of the simulation and the reason why it stopped
+                 */
+
+                if(me==ctp_root) {
+                        printf("\n\nSimulation stopped because only one node is still alive at time %f\n",
+                                       ((node_state *) snapshot)->lvt);
+                        printf("\n***************\n");
+                        print_statistics(ctp_root);
+                }
                 return true;
         }
 
         /*
-         * If the current node is the root of the collection tree, check that there are still some nodes alive and
-         * also check the number of data packets received
+         * If the current node is the root of the collection tree, check that it is still alive: if not, stop the
+         * simulation. Then check if the minimum number of packets from each node has been collected: if so, stop the
+         * simulation
          */
 
         if(((node_state*)snapshot)->root){
 
                 /*
-                 * First check if the root is still alive: if not, terminate the simulation
+                 * Counter of packets collected by the root
+                 */
+
+                unsigned long collected_packets=0;
+
+                /*
+                 * Check if the root is still alive: if not, terminate the simulation
                  */
 
                 if(!(((node_state*)snapshot)->state&RUNNING)) {
                         printf("\n\nSimulation stopped because the root node has crashed at time %f\n"
-                                       "Packets collected by root:%lu\n"
-                                ,((node_state*)snapshot)->lvt,collected_packets);
-                        for(i=0;i<n_prc_tot;i++) {
-                                if(i==ctp_root) {
-
-                                        /*
-                                         * Root node does not send packets, only collects them
-                                         */
-                                        printf("\n\nBeacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
-                                        printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
-                                        printf("\n***************\n");
-                                        continue;
-                                }
-                                printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
-                                printf("Beacons received by %d:%lu\n",i,node_statistics_list[i].beacons_received);
-                                printf("Beacons sent by %d:%lu\n",i,node_statistics_list[i].beacons_sent);
-                                printf("Data packets received by %d:%lu\n",i,
-                                       node_statistics_list[i].data_packets_received);
-                                printf("Data packets sent by %d:%lu\n",i,node_statistics_list[i].data_packets_sent);
-                                printf("Data packets sent (and acked) by %d:%lu\n",i,node_statistics_list[i].data_packets_acked);
-                                printf("Beacons lost :%lu\n",node_statistics_list[i].lost_beacons);
-                                printf("Data packets lost:%lu\n",node_statistics_list[i].lost_data_packets);
-                                printf("\n***************\n");
-                        }
-                        fflush(stdout);
+                                       ,((node_state*)snapshot)->lvt);
+                        printf("\n***************\n");
+                        print_statistics(ctp_root);
                         return true;
                 }
 
                 /*
-                 * If more than COLLECTED_DATA_PACKETS_GOAL have been received by each node (except the root itself)
+                 * If at least COLLECTED_DATA_PACKETS_GOAL have been received by each node (except the root itself)
                  * stop the simulation
                  */
 
@@ -814,9 +810,17 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                  */
 
                                 continue;
+
+
                         if (node_statistics_list[i].collected_packets <collected_packets_goal) {
                                 return false;
                         }
+
+                        /*
+                         * Increment the counter of packets collected by the root
+                         */
+
+                        collected_packets+=node_statistics_list[i].collected_packets;
                 }
                 printf("\n\nSimulation stopped because at least %lu packets have been collected from each node\n"
                                "Time:%f\nPackets collected by root:%lu\n"
@@ -835,18 +839,18 @@ bool OnGVT(unsigned int me, void*snapshot) {
                                  */
 
                                 continue;
-                        printf("Packets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
+                        printf("\nPackets from %d:%lu\n",i,node_statistics_list[i].collected_packets);
                 }
                 fflush(stdout);
-                return true;
         }
-        else{
-                /*
-                 * Other nodes are always ok with stopping simulation
-                 */
 
-                return true;
-        }
+        /*
+         * At this point, nodes other than the root are always ok with stopping simulation, while root is ok only if
+         * the goal number of packets has been achieved for each node or if the root itself has crashed
+         */
+
+        return true;
+
 }
 
 
@@ -1310,9 +1314,78 @@ bool is_failed(simtime_t now){
  */
 
 void collected_data_packet(ctp_data_packet* packet){
-        collected_packets++;
-        if(packet->data_packet_frame.origin)
+        if(packet->data_packet_frame.origin!=ctp_root)
                 node_statistics_list[packet->data_packet_frame.origin].collected_packets+=1;
+}
+
+/*
+ * PRINT RESULT OF THE SIMULATION
+ *
+ * Helper function to print the statistics about the simulation.
+ *
+ * @root: id of the root node; print out only the beacon sent/received for the root since it does not send data packets
+ */
+
+void print_statistics(unsigned int root){
+
+        /*
+         * Counter of packets collected by the root
+         */
+
+        unsigned long collected_packets=0;
+
+        /*
+         * Index variable used to iterate through nodes of the simulation
+         */
+
+        int i=0;
+
+        /*
+         * Print statistics about the single node
+         */
+        for (i = 0; i < n_prc_tot; i++) {
+                if (i == root) {
+
+                        /*
+                         * Root node does not send packets, only collects them
+                         */
+
+                        printf("Beacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
+                        printf("Beacons received by %d:%lu\n", i,
+                               node_statistics_list[i].beacons_received);
+                        printf("\n***************\n");
+                        continue;
+                }
+
+                /*
+                 * Increment the counter of packets collected by the root
+                 */
+
+                collected_packets+=node_statistics_list[i].collected_packets;
+
+                /*
+                 * Print statistics about the current node
+                 */
+
+                printf("Packets from %d:%lu\n", i, node_statistics_list[i].collected_packets);
+                printf("Beacons received by %d:%lu\n", i, node_statistics_list[i].beacons_received);
+                printf("Beacons sent by %d:%lu\n", i, node_statistics_list[i].beacons_sent);
+                printf("Data packets received by %d:%lu\n", i,
+                       node_statistics_list[i].data_packets_received);
+                printf("Data packets sent by %d:%lu\n", i, node_statistics_list[i].data_packets_sent);
+                printf("Data packets sent (and acked) by %d:%lu\n", i,
+                       node_statistics_list[i].data_packets_acked);
+                printf("Beacons lost:%lu\n", node_statistics_list[i].lost_beacons);
+                printf("Data packets lost :%lu\n", node_statistics_list[i].lost_data_packets);
+                printf("\n***************\n");
+        }
+
+        /*
+         * Print the total of packets collected
+         */
+
+        printf("Total packets collected by the root:%lu\n",collected_packets);
+        fflush(stdout);
 }
 
 /* SIMULATION FUNCTIONS - end */

@@ -92,7 +92,7 @@ void parse_forwarding_engine_parameters(void* event_content) {
 forwarding_queue_entry* forwarding_pool_get(node_state* state){
 
         /*
-         * If teh pool is empty, return NULL
+         * If the pool is empty, return NULL
          */
 
         if(!state->forwarding_pool_count)
@@ -556,7 +556,9 @@ void cache_remove(unsigned char offset,node_state* state){
  * SCHEDULE NEW SENDING
  *
  * Set the retransmission timer to a value calculated with some randomness and schedule a new sending phase when the
- * timer is fired. The value of the timer is randomly selected in the range [delta,interval-1+delta]
+ * timer is fired. The value of the timer is randomly selected in the range [delta,interval-1+delta].
+ * The FORWARDING ENGINE keep retransmitting a packet until it's successfully submitted to the link layer and, when this
+ * happens, keeps retransmitting for a maximum number of attempts
  *
  * @state: pointer to the object representing the current state of the node
  * @interval: value of the desired interval
@@ -571,10 +573,14 @@ void schedule_retransmission(node_state* state){
          * Do calculation in milliseconds
          */
 
-        double interval=RandomRange((unsigned int)(data_packet_transmission_delta*1000),
+        double interval=(RandomRange((unsigned int)(data_packet_transmission_delta*1000),
                                     (unsigned int)(((data_packet_transmission_delta+
-                                            data_packet_transmission_offset)*1000)-1));
-        wait_until(state->me,state->lvt+(interval/1000),RETRANSMITT_DATA_PACKET);
+                                            data_packet_transmission_offset)*1000)-1)))/1000.0;
+        /*printf("Node %d schedules retransmission at time %f\n",state->me,state->lvt+interval);
+        printf("TIME:%f\n",state->lvt);
+        printf("ìììììììì\n");
+        fflush(stdout);*/
+        wait_until(state->me,state->lvt+interval,RETRANSMITT_DATA_PACKET);
 }
 
 /*
@@ -609,18 +615,6 @@ void start_forwarding_engine(node_state* state){
          */
 
         state->data_packet_seqNo=0;
-
-        /*
-         * Set the guard variable, that protects the data packet from concurrent writing, to false
-         */
-
-        state->sending_data_packet=false;
-
-        /*
-         * Set the pointer to the last data packet acke to NULL
-         */
-
-        state->last_packet_acked=NULL;
 
         /*
          * Set the counter of routing loops detected to 0 initially
@@ -716,6 +710,7 @@ bool send_data_packet(node_state* state) {
                 /*
                  * Output queue is empty => return false because a further invocation will be of no help
                  */
+
                 return false;
         }
 
@@ -724,7 +719,7 @@ bool send_data_packet(node_state* state) {
          * before submitting a new packet
          */
 
-        if(state->state&SENDING) {
+        if(state->state&SENDING_DATA_PACKET) {
                 return false;
         }
 
@@ -828,11 +823,11 @@ bool send_data_packet(node_state* state) {
         submitted=send_frame(state,parent,CTP_DATA_PACKET);
 
         /*
-         * If the packet has been successfully submitted, set the flag SENDING
+         * If the packet has been successfully submitted, set the flag SENDING_DATA_PACKET
          */
 
         if(submitted)
-                state->state|=SENDING;
+                state->state|=SENDING_DATA_PACKET;
 
         /*
          * The data packet has been sent => no need to re-execute this function
@@ -870,7 +865,8 @@ void create_data_packet(node_state* state){
          * new one, otherwise the former would be overwritten
          */
 
-        if(!state->sending_data_packet) {
+        //if(!state->sending_local_data_packet) {
+        if(!(state->state&SENDING_LOCAL_DATA_PACKET)) {
 
                 /*
                  * Set the payload of the data packet to be sent
@@ -957,10 +953,11 @@ void create_data_packet(node_state* state){
                         forwarding_queue_enqueue(&state->local_entry, state);
 
                         /*
-                         * Set the guard variable to true, because the packet created is now in the forwarding queue
+                         * Set the guard flag because the packet created is now in the forwarding queue
                          */
 
-                        state->sending_data_packet=true;
+                        //state->sending_local_data_packet=true;
+                        state->state|=SENDING_LOCAL_DATA_PACKET;
 
                         /*
                          * Now check the state of the node: if another data packet has already been submitted to the
@@ -968,7 +965,7 @@ void create_data_packet(node_state* state){
                          * output queue and send it to the parent node
                          */
 
-                        if(!(state->state&SENDING)){
+                        if(!(state->state&SENDING_DATA_PACKET)){
 
                                 /*
                                  * A new data packet can be sent => call the sending function the first time
@@ -1079,10 +1076,17 @@ void received_data_packet(void* message,node_state* state) {
         else{
 
                 /*
-                 * Forward the data packet frame of the packet received
+                 * Check if the packet is for me: if so, forward it otherwise drop it
                  */
 
-                forward_data_packet(packet,state);
+                if(packet->link_frame.sink==state->me) {
+
+                        /*
+                         * Forward the data packet received
+                         */
+
+                        forward_data_packet(packet, state);
+                }
         }
 }
 
@@ -1233,6 +1237,7 @@ void transmitted_data_packet(node_state* state,bool result) {
                  * Schedule the new sending phase adding some randomness
                  */
 
+                state->is_retransmitting=true;
                 schedule_retransmission(state);
         }
         else {
@@ -1256,24 +1261,28 @@ void transmitted_data_packet(node_state* state,bool result) {
                  * the head of the output queue is the last acknowledged
                  */
 
-                if(state->last_packet_acked) {
-                        if (compare_data_packets(&head->data_packet_frame, &state->last_packet_acked->data_packet_frame,
-                                                 head->payload, state->last_packet_acked->payload) &&
-                            head->link_frame.src== state->last_packet_acked->link_frame.src &&
-                                head->link_frame.sink== state->last_packet_acked->link_frame.sink) {
+                if (compare_data_packets(&head->data_packet_frame, &state->last_packet_acked.data_packet_frame,
+                                                 head->payload, state->last_packet_acked.payload) &&
+                            head->link_frame.src== state->last_packet_acked.link_frame.src &&
+                                head->link_frame.sink== state->last_packet_acked.link_frame.sink) {
 
                                 /*
                                  * The packet has been acknowledged => remove the message from the output queue, so that
                                  * next transmission phase will send the next packet in the output queue
                                  */
 
+                                /*printf("Node %d -> packet acked ->before dequeueing head was %d and state was %d\n",state->me,
+                                state->forwarding_queue_head,state->state);
+                                printf("TIME:%f\n",state->lvt);
+                                printf("//////////\n");
+                                fflush(stdout);*/
                                 forwarding_queue_dequeue(state);
 
                                 /*
-                                 * Remove the SENDING FLAG
+                                 * Remove the SENDING_DATA_PACKET flag
                                  */
 
-                                state->state &= ~SENDING;
+                                state->state &= ~SENDING_DATA_PACKET;
 
                                 /*
                                  * Inform the LINK ESTIMATOR about the fact that the recipient acknowledged the data
@@ -1286,8 +1295,7 @@ void transmitted_data_packet(node_state* state,bool result) {
 
                                 /*
                                  * If the last packet sent was a forwarded one, insert in the output cache in order to
-                                 * avoid
-                                 * duplicates
+                                 * avoid duplicates
                                  */
 
                                 if (!head_entry->is_local) {
@@ -1298,12 +1306,15 @@ void transmitted_data_packet(node_state* state,bool result) {
                                          */
 
                                         forwarding_pool_put(head_entry, state);
+                                }
+                                else{
 
                                         /*
-                                         * Clear the flag indicating that a local data packet is being sent
+                                         * If the packet was created by the node, clear the flag indicating that a
+                                         * local data packet is being sent
                                          */
 
-                                        state->sending_data_packet = false;
+                                        state->state&=~SENDING_LOCAL_DATA_PACKET;
                                 }
 
                                 /*
@@ -1313,12 +1324,11 @@ void transmitted_data_packet(node_state* state,bool result) {
                                 node_statistics_list[state->me].data_packets_acked += 1;
 
                                 /*
-                                 * Reset the pointer to the last acked packed
+                                 * Reset the last packet acked
                                  */
 
-                                state->last_packet_acked=NULL;
+                                bzero(&state->last_packet_acked,sizeof(ctp_data_packet));
                         }
-                }
                 else{
 
                         /*
@@ -1354,6 +1364,7 @@ void transmitted_data_packet(node_state* state,bool result) {
                                  */
 
                                 head_entry->retries -= 1;
+                                state->is_retransmitting=true;
                                 schedule_retransmission(state);
                                 return;
                         }
@@ -1366,22 +1377,35 @@ void transmitted_data_packet(node_state* state,bool result) {
                                  * forwarding phase
                                  */
 
+                                /*printf("Node %d -> packet dropped ->before dequeueing head was %d and state was %d\n",state->me,
+                                       state->forwarding_queue_head,state->state);
+                                printf("Entry was local?%d\n",head_entry->is_local);
+                                printf("TIME:%f\n",state->lvt);
+                                printf("//////////\n");
+                                fflush(stdout);*/
                                 forwarding_queue_dequeue(state);
 
                                 /*
-                                 * Remove the SENDING FLAG
+                                 * Remove the SENDING_DATA_PACKET FLAG
                                  */
 
-                                state->state &= ~SENDING;
+                                state->state &= ~SENDING_DATA_PACKET;
 
                                 /*
-                                 * If the last packet sent was a forwarded one, give the entry back to the pool and
-                                 * clear the flag indicating that a local data packet is being sent
+                                 * If the last packet sent was a forwarded one, give the entry back to the pool
                                  */
 
                                 if (!head_entry->is_local) {
                                         forwarding_pool_put(head_entry,state);
-                                        state->sending_data_packet=false;
+                                }
+                                else{
+
+                                        /*
+                                         * The packet was created by the node, so clear the flag indicating that a local
+                                         * data packet is being sent
+                                         */
+
+                                        state->state&=~SENDING_LOCAL_DATA_PACKET;
                                 }
                         }
                 }

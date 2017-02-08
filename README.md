@@ -125,7 +125,8 @@ Just like in the real world, nodes <b>only send broadcast messages</b>, which ca
 <h3>Medium access</h3>
 <p align="justify">
 The last layer in the software stack of the nodes, the <i>MAC (Medium Access Control) layer</i> is in charge of avoid that nodes interfere one another when they have to send a message: the <b><i>CSMA (Carrier Sense Multiple Access)</i></b> protocol is adopted to achieve this goal.
-<br>A node starts sending a message only after he has sensed that the channel is free for a certain number of consecutive times; if this number of consecutive samples is not achieved, the packet is dropped. Everytime the node "sees" that channel is not free, namely a collision takes place, it backs off for a random interval of time: since all the nodes waits for a different interval of time, there are high chances that a new collision is avoided. <b>A channel is regarded "free" by a node if the noise from the ambient plus the strength of the signal of all the transmissions having the node as recipient is smaller than the gain of the channel.</b>
+<br>A node starts sending a message only after he has sensed that the channel is free for a certain number of consecutive times; if this number of consecutive samples is not achieved, the packet is dropped.
+Everytime the node "sees" that the channel is not free, hence a collision with other nodes would take place if it started transmitting, it backs off for a random interval of time: since all the nodes waits for a different interval of time, there are high chances that a collision is avoided. <b>A channel is regarded "free" by a node if the noise from the ambient plus the strength of the signal of all the transmissions having the node as recipient is smaller than the gain of the channel.</b>
 </p>
 <h3>Nodes' energy consumption</h3>
 <p align="justify">
@@ -254,7 +255,7 @@ More about the usage of the script can be found <a href="https://github.com/tiny
 <li align="justify"><b>data_packet_transmission_delta</b> -> Delta applied to calculate the random interval before a retransmission</li>
 <li align="justify"><b>no_route_offset</b> -> Interval of time after which the node tries to resend a data packet in case it has not chosen a parent yet (in seconds)</li>
 <li align="justify"><b>send_packet_timer</b> -> Period of the timer that triggers the sending of a new data packet (in seconds)</li>
-<li align="justify"><b>create_packet_timer</b> -> Period of the timer that triggers the creating of a new data packet (in seconds)</li>
+<li align="justify"><b>create_packet_timer</b> -> Period of the timer that triggers the creation of a new data packet (in seconds)</li>
 <li align="justify"><b>min_payload</b> -> Lower bound for the range of the data gathered by the node</li>
 <li align="justify"><b>max_payload</b> -> Upper bound for the range of the data gathered by the node</li>
 </ol>

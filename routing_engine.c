@@ -104,10 +104,11 @@ void start_routing_engine(node_state* state){
         state->parent_changes=0;
 
         /*
-         * Clear the "sending" flag because the node is not sending any beacon yet
+         * Clear the "SENDING_BEACON" flag because the node is not sending any beacon yet
          */
 
-        state->sending_beacon=false;
+        //state->sending_beacon=false;
+        state->state&=~SENDING_BEACON;
 
         /*
          * Initialize the route from this node to the root of the collection tree
@@ -858,7 +859,8 @@ void send_beacon(node_state* state){
          * Check if another beacon transmission is already ongoing: if so, drop the new beacon
          */
 
-        if(state->sending_beacon)
+        //if(state->sending_beacon)
+        if(state->state&SENDING_BEACON)
                 return;
 
         /*
@@ -921,11 +923,11 @@ void send_beacon(node_state* state){
         if(send_routing_packet(state)){
 
                 /*
-                 * The beacon can be sent now, so set the corresponding guard variable to avoid concurrent accesses to
-                 * the beacon
+                 * The beacon can be sent now, so set the corresponding flag to avoid concurrent accesses to the beacon
                  */
 
-                state->sending_beacon=true;
+                //state->sending_beacon=true;
+                state->state|=SENDING_BEACON;
 
         }
 }

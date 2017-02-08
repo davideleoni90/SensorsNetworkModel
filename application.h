@@ -6,6 +6,7 @@
 #include "forwarding_engine.h"
 #include <ROOT-Sim.h>
 #include <math.h>
+#include <pthread.h>
 
 /*
  * PARAMETERS OF THE SIMULATION - start
@@ -83,7 +84,7 @@ enum{
         FRAME_TRANSMITTED=11, // The frame has been transmitted
         TRANSMISSION_BEACON_STARTED=12, // The transmission of a new frame containing a beacon has started
         TRANSMISSION_DATA_PACKET_STARTED=13, // The transmission of a new frame containing a data packet has started
-        TRANSMISSION_FINISHED=14, // The transmission of a new frame has finished
+        TRANSMISSION_FINISHED=14 // The transmission of a new frame has finished
 };
 
 /*
@@ -104,8 +105,10 @@ enum {
  */
 
 enum{
-        SENDING=0x1, // Busy sending a data packet => wait before send another packet
-        RUNNING=0x4 // The node is running => has not failed (yet)
+        SENDING_DATA_PACKET=0x1, // Busy sending a data packet => wait before sending another one
+        SENDING_BEACON=0x2, // Busy sending a beacon => wait before sending another one
+        SENDING_LOCAL_DATA_PACKET=0x4, // Busy sending a local data packet => wait before sending another one
+        RUNNING=0x8 // The node is running => has not failed (yet)
 };
 
 /*
@@ -305,7 +308,7 @@ typedef struct _node_statistics{
         unsigned long collected_packets; // The number of packets sent by the node and collected by the root
         unsigned long lost_beacons; // The number of beacons lost by the node
         unsigned long lost_data_packets; // The number of data packets lost by the node
-
+        bool failed; // Boolean value indicating whether a node has crashed
 }node_statistics;
 
 /*
@@ -318,6 +321,8 @@ typedef struct _node_statistics{
  */
 
 typedef struct _node_state{
+
+        bool is_retransmitting;
 
         /* RADIO FIELDS - start */
 
@@ -365,9 +370,9 @@ typedef struct _node_state{
 
         /*
          * Pointer to the link layer frame of the next packet to be sent: if upper layers ask for the transmission of a
-         * new packet and this point is not set to NULL, the link layer ignores the requests. This may happen while the
-         * link layer is collecting samples of the free channel before sending a packet and an upper layer asks for the
-         * sending of a new packet
+         * new packet and this point is not set to NULL, the link layer ignores the requests. This may happen when the
+         * node is sending a beacon and the time to send a data packet too has come and vice-versa, or when the time to
+         * send a data packet too has come and the node is backing off for the retransmission offset
          */
 
         link_layer_frame* link_layer_outgoing;
@@ -407,14 +412,6 @@ typedef struct _node_state{
 
         /* ROUTING ENGINE FIELDS - start */
 
-        /*
-         * The node has only one beacon at disposal at a time => it is necessary to use the following guard variable to
-         * avoid that two events handled from two different layers of the node concurrently access the beacon (for
-         * instance, the ROUTING ENGINE sets the fields of the beacon while the LINK LAYER is waiting for the backoff
-         * time)
-         */
-
-        bool sending_beacon;
         ctp_routing_packet routing_packet; // The routing packet of the node
         route_info route; // Description of the route from the current node to the root
 
@@ -548,13 +545,7 @@ typedef struct _node_state{
 
         ctp_data_packet data_packet;
 
-        /*
-         * The node only creates one data packet at a time => it is necessary to use the following guard variable to
-         * avoid that the data packet is modified before it has been put into the output queue
-         */
-
-        bool sending_data_packet;
-        ctp_data_packet* last_packet_acked; // When a packet is acked, this variable points to the packet
+        ctp_data_packet last_packet_acked; // When a packet is acked, this variable points to the packet
 
         /*
          * LOCAL FORWARDING QUEUE ENTRY

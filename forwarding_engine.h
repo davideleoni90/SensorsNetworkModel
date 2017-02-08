@@ -53,7 +53,7 @@ typedef struct _ctp_data_packet ctp_data_packet;
 #endif
 
 #ifndef CREATE_PACKET_TIMER
-#define CREATE_PACKET_TIMER 3 // Period of the timer that triggers the creating of a new data packet (in seconds)
+#define CREATE_PACKET_TIMER 3 // Period of the timer that triggers the creation of a new data packet (in seconds)
 #endif
 
 #ifndef MIN_PAYLOAD

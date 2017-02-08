@@ -664,8 +664,8 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
 
         pending_transmission* current_transmission=state->pending_transmissions;
         if(!state->pending_transmissions) {
-                printf("pending transmissions NULL\n");
-                fflush(stdout);
+                /*printf("pending transmissions NULL\n");
+                fflush(stdout);*/
         }
 
         /*
@@ -785,13 +785,6 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
                         frame_received(state, &finished_transmission->frame.routing_packet, type);
                 }
                 else{
-
-                        /*
-                         * Inform the forwarding engine that a frame has been received
-                         */
-
-                        frame_received(state, &finished_transmission->frame.data_packet, type);
-
                         /*
                          * If the frame contains a data packet, the sender is waiting for an acknowledgment by the
                          * intended recipient => if this node is the recipient and it is not busy transmitting another
@@ -817,6 +810,13 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
 
                         if(recipient==state->me && !state->link_layer_transmitting)
                                 send_ack(state,&finished_transmission->frame.data_packet);
+
+                        /*
+                         * Inform the forwarding engine that a frame has been received
+                         */
+
+                        frame_received(state, &finished_transmission->frame.data_packet, type);
+
                 }
         }
 
