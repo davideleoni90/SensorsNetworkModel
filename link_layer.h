@@ -113,7 +113,7 @@
  */
 
 void start_frame_transmission(node_state* state);
-bool send_frame(node_state* state,unsigned int recipient, unsigned char type);
+bool send_frame(node_state* state,unsigned char type);
 void frame_transmitted(node_state* state);
 void frame_received(node_state* state,void* frame, unsigned char type);
 void check_channel(node_state* state);

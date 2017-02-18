@@ -108,7 +108,8 @@ enum{
         SENDING_DATA_PACKET=0x1, // Busy sending a data packet => wait before sending another one
         SENDING_BEACON=0x2, // Busy sending a beacon => wait before sending another one
         SENDING_LOCAL_DATA_PACKET=0x4, // Busy sending a local data packet => wait before sending another one
-        RUNNING=0x8 // The node is running => has not failed (yet)
+        SENDING_FRAME = 0x8, // Busy sending a link layer fram => wait before sending another one
+        RUNNING=0x10 // The node is running => has not failed (yet)
 };
 
 /*
@@ -348,13 +349,6 @@ typedef struct _node_state{
         double pending_transmissions_power;
 
         /*
-         * Pointer to the frame being sent: if upper layers ask for the transmission of a new frame and this is not
-         * NULL, the radio transceiver ignores the requests
-         */
-
-        void* radio_outgoing;
-
-        /*
          * Bit-wise OR combinations of flags indicating the actual state of the radio transceiver (whether it is busy
          * transmitting or receiving frames)
          */
@@ -367,15 +361,6 @@ typedef struct _node_state{
 
         unsigned char backoff_count; // Number of times the node experienced a collision on the channel and backed off
         unsigned char free_channel_count; // Number of times that the node has "seen" the channel free
-
-        /*
-         * Pointer to the link layer frame of the next packet to be sent: if upper layers ask for the transmission of a
-         * new packet and this point is not set to NULL, the link layer ignores the requests. This may happen when the
-         * node is sending a beacon and the time to send a data packet too has come and vice-versa, or when the time to
-         * send a data packet too has come and the node is backing off for the retransmission offset
-         */
-
-        link_layer_frame* link_layer_outgoing;
 
         /*
          * Flag indicating whether the frame that is being sent is a beacon or a data packet

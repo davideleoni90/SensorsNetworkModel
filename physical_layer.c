@@ -84,7 +84,7 @@ void init_physical_layer(node_state* state){
          * Set the pointer to the frame being sent to NULL
          */
 
-        state->radio_outgoing=NULL;
+        //state->radio_outgoing=NULL;
 
         /*
          * Set the power of the pending incoming transmissions to NULL
@@ -409,7 +409,7 @@ bool compare_pending_transmissions(pending_transmission*a,pending_transmission*b
 
                         return compare_link_layer_frames(&data_packet_a->link_frame,&data_packet_b->link_frame) &&
                                compare_data_packets(&data_packet_a->data_packet_frame,&data_packet_b->data_packet_frame,
-                               data_packet_a->payload,data_packet_b->payload);
+                                                    data_packet_a->payload,data_packet_b->payload);
                 }
         }
 
@@ -432,25 +432,18 @@ bool compare_pending_transmissions(pending_transmission*a,pending_transmission*b
 void send_ack(node_state* state,ctp_data_packet* packet){
 
         /*
-         * If there's no other transmission going on, the packet is acknowledged
+         * The radio transceiver is not busy => get the sender of the packet and send it an event to inform
+         * about the reception of the ack
          */
 
-        if(!state->radio_outgoing) {
 
-                /*
-                 * The radio transceiver is not busy => get the sender of the packet and send it an event to inform
-                 * about the reception of the ack
-                 */
-
-                unsigned int sender=packet->link_frame.src;
-                if(sender<n_prc_tot)
-                        ScheduleNewEvent(sender,state->lvt,ACK_RECEIVED,packet,sizeof(ctp_data_packet));
-                else{
-                        printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
-                                       "\n", sender);
-                        exit(EXIT_FAILURE);
-                }
-
+        unsigned int sender=packet->link_frame.src;
+        if(sender<n_prc_tot)
+                ScheduleNewEvent(sender,state->lvt,ACK_RECEIVED,packet,sizeof(ctp_data_packet));
+        else{
+                printf("[FATAL ERROR] Scheduling event of type %d for node %d, that does not exist"
+                               "\n", ACK_RECEIVED,sender);
+                exit(EXIT_FAILURE);
         }
 }
 
@@ -611,10 +604,10 @@ void new_pending_transmission(node_state* state, double gain,unsigned char type,
 
         if(state->me<n_prc_tot)
                 ScheduleNewEvent(state->me,state->lvt+duration,TRANSMISSION_FINISHED,new_pending_transmission,
-                         sizeof(pending_transmission));
+                                 sizeof(pending_transmission));
         else{
-                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
-                               "\n", state->me);
+                printf("[FATAL ERROR] Scheduling event of type %d for node %d, that does not exist"
+                               "\n", TRANSMISSION_FINISHED,state->me);
                 exit(EXIT_FAILURE);
         }
 }
@@ -827,17 +820,10 @@ void transmission_finished(node_state* state,pending_transmission* finished_tran
         state->radio_state&=~RADIO_RECEIVING;
 
         /*
-         * Reset the pointer to the outgoing frame
-         */
-
-        state->radio_outgoing=NULL;
-
-        /*
          * Finally remove the element associated to the pending transmission
          */
 
         free(finished_transmission_list);
-
 }
 
 /*
@@ -970,17 +956,6 @@ void check_noises_list(){
 void transmit_frame(node_state* state,unsigned char type){
 
         /*
-         * Get the pointer to the frame to be sent: either the beacon of the node or the packet in the head of the
-         * output queue
-         */
-
-        if(type==CTP_BEACON)
-                state->radio_outgoing = &state->routing_packet;
-        else {
-                state->radio_outgoing = &state->forwarding_queue[state->forwarding_queue_head]->packet;
-        }
-
-        /*
          * Get the first element in the list of the links of the sender
          */
 
@@ -1017,7 +992,7 @@ void transmit_frame(node_state* state,unsigned char type){
                          * This frame contains a beacon
                          */
 
-                        ((ctp_routing_packet*)state->radio_outgoing)->link_frame.gain=gain;
+                        state->routing_packet.link_frame.gain=gain;
 
                         /*
                          * Schedule a new event destined to the sink node of the link, containing the frame being
@@ -1025,11 +1000,11 @@ void transmit_frame(node_state* state,unsigned char type){
                          */
 
                         if(sink<n_prc_tot)
-                                ScheduleNewEvent(sink,state->lvt,TRANSMISSION_BEACON_STARTED,state->radio_outgoing,
-                                         sizeof(ctp_routing_packet));
+                                ScheduleNewEvent(sink,state->lvt,TRANSMISSION_BEACON_STARTED,&state->routing_packet,
+                                                 sizeof(ctp_routing_packet));
                         else{
-                                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
-                                               "\n", sink);
+                                printf("[FATAL ERROR] Scheduling event of type %d for node %d, that does not exist"
+                                               "\n",TRANSMISSION_BEACON_STARTED,sink);
                                 exit(EXIT_FAILURE);
                         }
 
@@ -1040,7 +1015,7 @@ void transmit_frame(node_state* state,unsigned char type){
                          * This frame contains a data packet
                          */
 
-                        ((ctp_data_packet*)state->radio_outgoing)->link_frame.gain=gain;
+                        state->data_packet.link_frame.gain=gain;
 
                         /*
                          * Schedule a new event destined to the sink node of the link, containing the frame being
@@ -1048,11 +1023,12 @@ void transmit_frame(node_state* state,unsigned char type){
                          */
 
                         if(sink<n_prc_tot)
-                                ScheduleNewEvent(sink,state->lvt,TRANSMISSION_DATA_PACKET_STARTED,state->radio_outgoing,
-                                         sizeof(ctp_data_packet));
+                                ScheduleNewEvent(sink,state->lvt,TRANSMISSION_DATA_PACKET_STARTED,
+                                                 &state->forwarding_queue[state->forwarding_queue_head]->packet,
+                                                 sizeof(ctp_data_packet));
                         else{
-                                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
-                                               "\n", sink);
+                                printf("[FATAL ERROR] Scheduling event of type %d for node %d, that does not exist"
+                                               "\n", TRANSMISSION_DATA_PACKET_STARTED,sink);
                                 exit(EXIT_FAILURE);
                         }
                 }

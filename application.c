@@ -725,10 +725,17 @@ bool OnGVT(unsigned int me, void*snapshot) {
         unsigned int i;
 
         /*
+         * If nodes have not started yet, return false
+         */
+
+        if(((node_state*)snapshot)->lvt<=1.0)
+                return false;
+
+        /*
          * If the value of virtual time is beyond the limit, stop the simulation
          */
 
-        if((((node_state*)snapshot)->lvt>max_simulation_time) &&( ((node_state*)snapshot)->lvt>1.0)){
+        if(((node_state*)snapshot)->lvt>max_simulation_time){
 
                 /*
                  * The root node prints the result of the simulation and the reason why it stopped
@@ -876,8 +883,8 @@ void wait_until(unsigned int me,simtime_t timestamp,unsigned int type){
         if(me<n_prc_tot)
                 ScheduleNewEvent(me,timestamp,type,NULL,0);
         else{
-                printf("[FATAL ERROR] Scheduling event for node %d, that does not exist"
-                               "\n", me);
+                printf("[FATAL ERROR] Scheduling event of type %d for node %d, that does not exist"
+                               "\n", type,me);
                 exit(EXIT_FAILURE);
         }
 }

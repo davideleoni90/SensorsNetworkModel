@@ -809,12 +809,6 @@ bool send_routing_packet(node_state* state){
         ctp_link_estimator_frame* link_estimator_frame;
 
         /*
-         * The ID of the recipient is the address for broadcast transmissions
-         */
-
-        unsigned int recipient=BROADCAST_ADDRESS;
-
-        /*
          * Extract the link estimator frame from the given beacon
          */
 
@@ -834,11 +828,17 @@ bool send_routing_packet(node_state* state){
         state->beacon_sequence_number+=1;
 
         /*
+         * Set the BROADCAST_ADDRESS as recipient for the link layer frame
+         */
+
+        state->routing_packet.link_frame.sink=BROADCAST_ADDRESS;
+
+        /*
          * At this point the beacon is well formed, so it's time to send it to the neighbour nodes => ask the link
          * layer if it's possible to broadcast it and forward the answer to the ROUTING ENGINE
          */
 
-        return send_frame(state,recipient,CTP_BEACON);
+        return send_frame(state,CTP_BEACON);
 }
 
 /*

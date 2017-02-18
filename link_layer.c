@@ -104,7 +104,8 @@ void init_link_layer(node_state* state){
          * Set the pointer to the frame being sent to NULL
          */
 
-        state->link_layer_outgoing=NULL;
+        //state->link_layer_outgoing=NULL;
+        //state->link_layer_outgoing.src=n_prc_tot+1;
 
         /*
          * Set the type for the the frame being sent to
@@ -118,57 +119,6 @@ void init_link_layer(node_state* state){
 
         state->data_packet.link_frame.src=state->me;
         state->routing_packet.link_frame.src=state->me;
-}
-
-/*
- * GET FRAME
- * The LINK ESTIMATOR and the FORWARDING ENGINE are "wired" to the LINK LAYER using the same interface for sending
- * different types of packets, brodcast messages and unicast messages (that require an acknowledgment) respectively:
- * they only provide the type of the packet to be transmitted, so the link layer has to set the pointer to the link
- * layer frame of the next packet to be transmitted => this function performs this task
- *
- * @state: pointer to the object representing the current state of the node
- * @type: the type of the packet to be transmitted (either CTP_BEACON or CTP_DATA_PACKET)
- *
- */
-
-void get_frame(node_state* state,unsigned char type){
-
-        /*
-         * Check the type of the packet
-         */
-
-        if(type==CTP_BEACON){
-
-                /*
-                 * The packet is a beacon => set link_layer_outgoing to the link layer frame of beacon of the node
-                 */
-
-                state->link_layer_outgoing=&state->routing_packet.link_frame;
-                /*printf("Node %d has state with address is %p\n",state->me,
-                       state);
-                printf("TIME:%.15f\n",state->lvt);
-                printf("Address of link layer of routing packet for node %d is %p\n",state->me,
-                       state->link_layer_outgoing);
-                printf("**********\n");
-                fflush(stdout);*/
-        }
-        else{
-
-                /*
-                 * The packet is a data packet => set link_layer_outgoing to the link layer frame of the head of the
-                 * output queue; also save the type in the corresponding variable of the state
-                 */
-
-                state->link_layer_outgoing=&state->forwarding_queue[state->forwarding_queue_head]->packet.link_frame;
-                /*printf("Address of state for node %d is %p\n",state->me,
-                       state);
-                printf("TIME:%.15f\n",state->lvt);
-                printf("Address of link layer of data packet for node %d is %p\n",state->me,
-                       state->link_layer_outgoing);
-                printf("**********\n");
-                fflush(stdout);*/
-        }
 }
 
 /*
@@ -211,11 +161,6 @@ void start_csma(node_state* state){
          * Schedule a new event to tell this node to check whether the channel is free after the backoff time
          */
 
-        /*printf("Node %d schedules check channel at time %f\n",state->me,first_sample);
-        printf("The state is %d\n",state->state);
-        printf("Link layer:%p\n",state->link_layer_outgoing);
-        printf("++++++++\n");
-        fflush(stdout);*/
         wait_until(state->me,first_sample,CHECK_CHANNEL_FREE);
 }
 
@@ -234,18 +179,6 @@ void start_csma(node_state* state){
  */
 
 void check_channel(node_state* state){
-
-        /*
-         * Check if the packet to be sent is still valid: if not, clear all the flags of the node and stop
-         */
-
-        if(!state->link_layer_outgoing){
-                /*printf("NULL node %d, time %.15f\n",state->me,state->lvt);
-                fflush(stdout);*/
-                state->state&=~SENDING_BEACON;
-                state->state&=~SENDING_DATA_PACKET;
-                return;
-        }
 
         /*
          * Increment the counter of backoffs by one
@@ -309,12 +242,6 @@ void check_channel(node_state* state){
                  * transmission of the packet
                  */
 
-                /*printf("Node %d schedules start transmission at time %.15f\n",state->me,state->lvt+rxtx_switch_delay);
-                printf("TIME:%.15f\n",state->lvt);
-                printf("The state is %d\n",state->state);
-                printf("Link layer:%p\n",state->link_layer_outgoing);
-                printf("++++++++\n");
-                fflush(stdout);*/
                 wait_until(state->me,state->lvt+rxtx_switch_delay,START_FRAME_TRANSMISSION);
         }
         else if(!csma_max_free_samples || state->backoff_count<=csma_max_free_samples){
@@ -341,12 +268,6 @@ void check_channel(node_state* state){
                  * Schedule a new event to tell this node to check whether the channel is free after the backoff time
                  */
 
-                /*printf("Node %d schedules check channel at time %f\n",state->me,state->lvt+backoff);
-                printf("TIME:%.15f\n",state->lvt);
-                printf("The state is %d\n",state->state);
-                printf("Link layer:%p\n",state->link_layer_outgoing);
-                printf("++++++++\n");
-                fflush(stdout);*/
                 wait_until(state->me,state->lvt+backoff,CHECK_CHANNEL_FREE);
         }
         else{
@@ -359,7 +280,7 @@ void check_channel(node_state* state){
                  * state of the node
                  */
 
-                state->link_layer_outgoing=NULL;
+                state->state&=~SENDING_FRAME;
 
                 /*
                  * Clear the variable related to the type of the outgoing frame
@@ -371,14 +292,12 @@ void check_channel(node_state* state){
                  * Tell the layer that requested the transmission that the packet had to be dropped
                  */
 
-                //if(state->link_layer_outgoing_type==CTP_BEACON){
                 if(temp==CTP_BEACON){
 
                         /*
                          * The packet is a beacon => inform the ROUTING ENGINE: simply clear its sending guard flag
                          */
 
-                        //state->sending_beacon=false;
                         state->state&=~SENDING_BEACON;
                 }
                 else{
@@ -406,26 +325,10 @@ void check_channel(node_state* state){
 void start_frame_transmission(node_state* state){
 
         /*
-         * Check if the packet to be sent is still valid: if not, clear all the flags of the node and stop
-         */
-
-        if(!state->link_layer_outgoing){
-                state->state&=~SENDING_BEACON;
-                state->state&=~SENDING_DATA_PACKET;
-                return;
-        }
-
-        /*
          * Get the type of the frame to be transmitted, either CTP_BEACON or CTP_DATA_PACKET
          */
 
         unsigned char type=state->link_layer_outgoing_type;
-
-        /*
-         * Set the state of the radio to RADIO_TRANSMITTING
-         */
-
-        //state->state|=RADIO_TRANSMITTING;
 
         /*
          * Duration of the transmission of the frame, i.e. the time it takes for the neighbour nodes to successfully
@@ -475,14 +378,10 @@ void start_frame_transmission(node_state* state){
          * Set the duration of the transmission in the link layer frame of the packet
          */
 
-        if(!state->link_layer_outgoing) {
-                /*printf("NULL outgoing with type:%d for state %d; address %p\n", state->link_layer_outgoing_type,
-                       state->me,state->link_layer_outgoing);
-                printf("TIME:%.15f\n",state->lvt);
-                fflush(stdout);*/
-                //return;
-        }
-        state->link_layer_outgoing->duration=duration;
+        if(state->link_layer_outgoing_type==CTP_BEACON)
+                state->routing_packet.link_frame.duration=duration;
+        else
+                state->forwarding_queue[state->forwarding_queue_head]->packet.link_frame.duration=duration;
 
         /*
          * Start the transmission of the frame using the radio transceiver: the last parameter is the virtual time when
@@ -502,12 +401,6 @@ void start_frame_transmission(node_state* state){
          * Schedule a new event to signal that the transmission is finished and acknowledgment should have been received
          */
 
-        /*printf("Node %d schedules transmission finished at time %f\n",state->me,state->lvt+duration);
-        printf("TIME:%.15f\n",state->lvt);
-        printf("The state is %d\n",state->state);
-        printf("Link layer:%p\n",state->link_layer_outgoing);
-        printf("++++++++\n");
-        fflush(stdout);*/
         wait_until(state->me,state->lvt+duration,FRAME_TRANSMITTED);
 }
 
@@ -518,38 +411,30 @@ void start_frame_transmission(node_state* state){
  * and a beacon respectively through a wireless link.
  *
  * @state: pointer to the object representing the current state of the node
- * @recipient: ID of the recipient node
  * @type: the type of the packet (either CTP_BEACON or CTP_DATA_PACKET)
  *
  * Returns true if it's possible to send the frame now, false otherwise
  */
 
-bool send_frame(node_state* state,unsigned int recipient, unsigned char type){
+bool send_frame(node_state* state,unsigned char type){
 
         /*
          * First check that the link layer is not already busy sending another packet: if so, return false
          */
 
-        if(state->link_layer_outgoing || state->is_retransmitting)
+        if(state->state&SENDING_FRAME || state->is_retransmitting)
                 return false;
-
         /*
-         * The link layer is not busy => get the pointer to the link layer frame of the new packet to be transmitted
+         * The link layer is not busy => a link layer frame can be sent => set the flag in the state variable
          */
 
-        get_frame(state,type);
+        state->state|=SENDING_FRAME;
 
         /*
          * Save the type of the frame in the corresponding variable of the state
          */
 
         state->link_layer_outgoing_type=type;
-
-        /*
-         * Set the ID of the destination node in the link layer frame
-         */
-
-        state->link_layer_outgoing->sink=recipient;
 
         /*
          * Set the number of times the nodes wants to see the channel free before transmitting the packet
@@ -592,11 +477,11 @@ void frame_transmitted(node_state* state){
          * Check if the packet to be sent is still valid: if not, clear all the flags of the node and stop
          */
 
-        if(!state->link_layer_outgoing){
+        /*if(!state->link_layer_outgoing){
                 state->state&=~SENDING_BEACON;
                 state->state&=~SENDING_DATA_PACKET;
                 return;
-        }
+        }*/
 
         /*
          * Get the type of the packet transmitted
@@ -614,7 +499,9 @@ void frame_transmitted(node_state* state){
         printf("TIME:%.15f\n",state->lvt);
         printf("----------\n");
         fflush(stdout);*/
-        state->link_layer_outgoing=NULL;
+        //state->link_layer_outgoing=NULL;
+        //state->link_layer_outgoing.src=n_prc_tot+1;
+        state->state&=~SENDING_FRAME;
 
         /*
          * Clear the variable related to the type of the last frame sent
@@ -633,6 +520,12 @@ void frame_transmitted(node_state* state){
          */
 
         state->radio_state&=~RADIO_TRANSMITTING;
+
+        /*
+         * Reset the pointer to the outgoing frame
+         */
+
+        //state->radio_outgoing=NULL;
 
         /*
          * Signal reception to above layers, either to the FORWARDING ENGINE or the ROUTING ENGINE

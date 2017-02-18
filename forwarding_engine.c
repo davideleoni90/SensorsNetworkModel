@@ -820,7 +820,7 @@ bool send_data_packet(node_state* state) {
          * Forward the data packet to the specified destination => call the dedicated function from the link layer
          */
 
-        submitted=send_frame(state,parent,CTP_DATA_PACKET);
+        submitted=send_frame(state,CTP_DATA_PACKET);
 
         /*
          * If the packet has been successfully submitted, set the flag SENDING_DATA_PACKET
@@ -1271,11 +1271,6 @@ void transmitted_data_packet(node_state* state,bool result) {
                                  * next transmission phase will send the next packet in the output queue
                                  */
 
-                                /*printf("Node %d -> packet acked ->before dequeueing head was %d and state was %d\n",state->me,
-                                state->forwarding_queue_head,state->state);
-                                printf("TIME:%f\n",state->lvt);
-                                printf("//////////\n");
-                                fflush(stdout);*/
                                 forwarding_queue_dequeue(state);
 
                                 /*
@@ -1377,12 +1372,6 @@ void transmitted_data_packet(node_state* state,bool result) {
                                  * forwarding phase
                                  */
 
-                                /*printf("Node %d -> packet dropped ->before dequeueing head was %d and state was %d\n",state->me,
-                                       state->forwarding_queue_head,state->state);
-                                printf("Entry was local?%d\n",head_entry->is_local);
-                                printf("TIME:%f\n",state->lvt);
-                                printf("//////////\n");
-                                fflush(stdout);*/
                                 forwarding_queue_dequeue(state);
 
                                 /*
